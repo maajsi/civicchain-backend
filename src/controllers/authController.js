@@ -2,23 +2,44 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { Keypair } = require('@solana/web3.js');
-const { fundWallet } = require('../config/solana');
+const { fundWallet, createUserOnChain } = require('../services/solanaService');
 require('dotenv').config();
 
 /**
  * POST /auth/login
- * Handle Google OAuth login, create or retrieve user, return JWT
+ * Handle NextAuth JWT verification, create or retrieve user
+ * Expects JWT in request body, validates it, creates/returns user
  */
 async function login(req, res) {
   const client = await pool.connect();
   
   try {
-    const { email, name, profile_pic } = req.body;
+    const { jwt_token } = req.body;
+
+    if (!jwt_token) {
+      return res.status(400).json({
+        success: false,
+        error: 'JWT token is required'
+      });
+    }
+
+    // Verify and decode JWT from NextAuth
+    let decoded;
+    try {
+      decoded = jwt.verify(jwt_token, process.env.JWT_SECRET);
+    } catch (jwtError) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid or expired JWT token'
+      });
+    }
+
+    const { email, name, picture } = decoded;
 
     if (!email || !name) {
       return res.status(400).json({
         success: false,
-        error: 'Email and name are required'
+        error: 'Email and name are required in JWT'
       });
     }
 
@@ -55,7 +76,7 @@ async function login(req, res) {
         userId,
         email,
         name,
-        profile_pic || null,
+        picture || null,
         walletAddress,
         'citizen',
         100,
@@ -73,21 +94,17 @@ async function login(req, res) {
         console.warn('⚠️  Failed to fund wallet:', fundError.message);
         // Continue anyway - wallet funding is not critical for development
       }
+
+      // Create user on Solana blockchain
+      try {
+        const blockchainTx = await createUserOnChain(walletAddress, 100, 'citizen');
+        console.log(`⛓️  Created user on-chain: ${blockchainTx}`);
+      } catch (blockchainError) {
+        console.warn('⚠️  Failed to create user on-chain:', blockchainError.message);
+      }
     }
 
-    // Generate JWT
-    const token = jwt.sign(
-      {
-        user_id: user.user_id,
-        email: user.email,
-        role: user.role,
-        wallet_address: user.wallet_address
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-    );
-
-    // Return response
+    // Return response (no JWT generation here, NextAuth handles it)
     return res.status(200).json({
       success: true,
       is_new: isNew,
@@ -105,8 +122,7 @@ async function login(req, res) {
         verifications_done: user.verifications_done,
         badges: user.badges,
         created_at: user.created_at
-      },
-      jwt_token: token
+      }
     });
 
   } catch (error) {

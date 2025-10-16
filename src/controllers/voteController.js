@@ -2,6 +2,7 @@ const pool = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const { updateIssuePriority } = require('../utils/priority');
 const { REPUTATION_CHANGES, calculateNewReputation, updateBadges } = require('../utils/reputation');
+const { recordVoteOnChain, updateReputationOnChain } = require('../services/solanaService');
 
 /**
  * POST /issue/:id/upvote
@@ -80,8 +81,11 @@ async function upvoteIssue(req, res) {
     const newBadges = updateBadges(updatedReporter.rows[0]);
     await client.query('UPDATE users SET badges = $1 WHERE user_id = $2', [newBadges, issue.reporter_user_id]);
 
-    // TODO: Create blockchain transaction
-    const blockchainTxHash = `mock_tx_upvote_${Date.now()}`;
+    // Record vote on blockchain
+    const blockchainTxHash = await recordVoteOnChain(id, userId, 'upvote');
+
+    // Update reputation on blockchain
+    await updateReputationOnChain(reporter.wallet_address, newRep);
 
     await client.query('COMMIT');
 
@@ -203,8 +207,11 @@ async function downvoteIssue(req, res) {
     const newBadges = updateBadges(updatedReporter.rows[0]);
     await client.query('UPDATE users SET badges = $1 WHERE user_id = $2', [newBadges, issue.reporter_user_id]);
 
-    // TODO: Create blockchain transaction
-    const blockchainTxHash = `mock_tx_downvote_${Date.now()}`;
+    // Record vote on blockchain
+    const blockchainTxHash = await recordVoteOnChain(id, userId, 'downvote');
+
+    // Update reputation on blockchain
+    await updateReputationOnChain(reporter.wallet_address, newRep);
 
     await client.query('COMMIT');
 

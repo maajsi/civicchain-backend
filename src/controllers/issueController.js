@@ -2,6 +2,8 @@ const pool = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const { calculatePriorityScore, updateIssuePriority, CATEGORY_URGENCY } = require('../utils/priority');
 const { updateBadges, REPUTATION_CHANGES, calculateNewReputation } = require('../utils/reputation');
+const { classifyImageWithAI } = require('../services/aiService');
+const { createIssueOnChain } = require('../services/solanaService');
 const path = require('path');
 const fs = require('fs');
 
@@ -19,13 +21,10 @@ async function classifyIssue(req, res) {
     }
 
     const imageUrl = `/uploads/${req.file.filename}`;
+    const imagePath = path.join(__dirname, '../../uploads', req.file.filename);
 
-    // TODO: Call AI service for classification
-    // For now, return a default classification
-    // In production, this would call the Python FastAPI service
-
-    // Mock AI response
-    const suggestedCategory = 'pothole'; // This would come from AI
+    // Call Roboflow AI service for classification
+    const suggestedCategory = await classifyImageWithAI(imagePath);
     const urgencyScore = CATEGORY_URGENCY[suggestedCategory] || 5;
 
     return res.status(200).json({
@@ -125,9 +124,13 @@ async function reportIssue(req, res) {
     const newBadges = updateBadges(updatedUser.rows[0]);
     await client.query('UPDATE users SET badges = $1 WHERE user_id = $2', [newBadges, userId]);
 
-    // TODO: Create blockchain transaction
-    // For now, use a mock transaction hash
-    const blockchainTxHash = `mock_tx_${Date.now()}`;
+    // Create blockchain transaction
+    const blockchainTxHash = await createIssueOnChain({
+      issue_id: issueId,
+      reporter_wallet: user.wallet_address,
+      category,
+      priority_score: priorityScore
+    });
     await client.query(
       'UPDATE issues SET blockchain_tx_hash = $1 WHERE issue_id = $2',
       [blockchainTxHash, issueId]

@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database with PostGIS
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: civicchain-db
+    environment:
+      POSTGRES_DB: civicchain
+      POSTGRES_USER: civicchain_user
+      POSTGRES_PASSWORD: civicchain_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - civicchain-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U civicchain_user -d civicchain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Roboflow AI Service
+  ai-service:
+    image: roboflow/roboflow-inference-server-cpu:latest
+    container_name: civicchain-ai
+    ports:
+      - "9001:9001"
+    networks:
+      - civicchain-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # CivicChain Backend API
+  backend:
+    build: .
+    container_name: civicchain-backend
+    environment:
+      # Database
+      DATABASE_URL: postgresql://civicchain_user:civicchain_password@db:5432/civicchain
+      
+      # Server
+      PORT: 3000
+      NODE_ENV: production
+      
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_change_in_production}
+      JWT_EXPIRES_IN: 7d
+      
+      # Solana
+      SOLANA_NETWORK: devnet
+      SOLANA_RPC_URL: https://api.devnet.solana.com
+      SOLANA_PROGRAM_ID: ${SOLANA_PROGRAM_ID:-}
+      MASTER_WALLET_PRIVATE_KEY: ${MASTER_WALLET_PRIVATE_KEY:-[]}
+      
+      # AI Service
+      AI_SERVICE_URL: http://ai-service:9001
+      ROBOFLOW_ENDPOINT: /civic-issue-yljwt/2
+      
+      # File Upload
+      MAX_FILE_SIZE: 10485760
+      ALLOWED_FILE_TYPES: image/jpeg,image/jpg,image/png
+      
+      # CORS
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    networks:
+      - civicchain-network
+    command: sh -c "npm run migrate && npm start"
+
+volumes:
+  postgres_data:
+
+networks:
+  civicchain-network:
+    driver: bridge

@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "migrate": "node src/config/migrations.js",
+    "migrate": "node src/config/migrationRunner.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -19,11 +19,16 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@project-serum/anchor": "^0.26.0",
     "@solana/web3.js": "^1.98.4",
+    "axios": "^1.12.2",
     "bcryptjs": "^3.0.2",
+    "bn.js": "^5.2.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "form-data": "^4.0.4",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "pg": "^8.16.3",

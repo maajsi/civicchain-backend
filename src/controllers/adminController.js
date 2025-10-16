@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const { updateIssueStatusOnChain } = require('../services/solanaService');
 
 /**
  * GET /admin/dashboard
@@ -324,8 +325,8 @@ async function updateIssueStatus(req, res) {
       );
     }
 
-    // TODO: Create blockchain transaction
-    const blockchainTxHash = `mock_tx_status_${Date.now()}`;
+    // Update issue status on blockchain
+    const blockchainTxHash = await updateIssueStatusOnChain(id, status, req.user.wallet_address);
     await client.query(
       'UPDATE issues SET blockchain_tx_hash = $1 WHERE issue_id = $2',
       [blockchainTxHash, id]

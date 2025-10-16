@@ -1,6 +1,7 @@
 const pool = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const { REPUTATION_CHANGES, calculateNewReputation, updateBadges } = require('../utils/reputation');
+const { recordVerificationOnChain, updateReputationOnChain } = require('../services/solanaService');
 
 /**
  * POST /issue/:id/verify
@@ -139,8 +140,12 @@ async function verifyIssue(req, res) {
       autoClosed = true;
     }
 
-    // TODO: Create blockchain transaction
-    const blockchainTxHash = `mock_tx_verify_${Date.now()}`;
+    // Record verification on blockchain
+    const blockchainTxHash = await recordVerificationOnChain(id, userId);
+
+    // Update reputations on blockchain
+    await updateReputationOnChain(verifier.wallet_address, verifierNewRep);
+    await updateReputationOnChain(reporter.wallet_address, reporterNewRep);
 
     await client.query('COMMIT');
 
