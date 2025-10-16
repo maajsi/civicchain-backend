@@ -1,6 +1,5 @@
 # Dependencies
 node_modules/
-package-lock.json
 
 # Environment variables
 .env
@@ -31,3 +30,6 @@ dist/
 build/
 coverage/
 .nyc_output/
+*.d
+*.rlib
+debug/

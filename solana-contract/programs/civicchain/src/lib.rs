@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("874ACJUbeRDKucRxCrnxoVqseYsPfbzNLY94131grpFk");
 
 #[program]
 pub mod civicchain {
@@ -305,7 +305,7 @@ pub enum UserRole {
     Government,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum IssueStatus {
     Open,
     InProgress,
@@ -322,7 +322,7 @@ pub enum IssueCategory {
     Other,
 }
 
-#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum VoteType {
     Upvote,
     Downvote,

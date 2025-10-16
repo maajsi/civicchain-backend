@@ -7,8 +7,8 @@ services:
     container_name: civicchain-db
     environment:
       POSTGRES_DB: civicchain
-      POSTGRES_USER: civicchain_user
-      POSTGRES_PASSWORD: civicchain_password
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: civicchain
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -16,7 +16,7 @@ services:
     networks:
       - civicchain-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U civicchain_user -d civicchain"]
+      test: ["CMD-SHELL", "pg_isready -U root -d civicchain"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,7 +42,7 @@ services:
     container_name: civicchain-backend
     environment:
       # Database
-      DATABASE_URL: postgresql://civicchain_user:civicchain_password@db:5432/civicchain
+      DATABASE_URL: postgresql://root:civicchain@db:5432/civicchain
       
       # Server
       PORT: 3000
