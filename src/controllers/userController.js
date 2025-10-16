@@ -34,6 +34,7 @@ async function getCurrentUser(req, res) {
       success: true,
       user: {
         user_id: user.user_id,
+        provider_id: user.provider_id,
         email: user.email,
         name: user.name,
         profile_pic: user.profile_pic,
@@ -70,8 +71,18 @@ async function getUserById(req, res) {
   try {
     const { user_id } = req.params;
 
-    const query = 'SELECT * FROM users WHERE user_id = $1';
-    const result = await client.query(query, [user_id]);
+    // Accept both UUID and provider_id string
+    const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    let query, value;
+    if (uuidRegex.test(user_id)) {
+      query = 'SELECT * FROM users WHERE user_id = $1';
+      value = user_id;
+    } else {
+      query = 'SELECT * FROM users WHERE provider_id = $1';
+      value = user_id;
+    }
+
+    const result = await client.query(query, [value]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
@@ -87,6 +98,7 @@ async function getUserById(req, res) {
       success: true,
       user: {
         user_id: user.user_id,
+        provider_id: user.provider_id,
         name: user.name,
         profile_pic: user.profile_pic,
         wallet_address: user.wallet_address,

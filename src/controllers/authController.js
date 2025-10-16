@@ -48,16 +48,30 @@ async function login(req, res) {
       });
     }
 
-    // Check if user exists
-    const existingUserQuery = 'SELECT * FROM users WHERE email = $1';
-    const existingUserResult = await client.query(existingUserQuery, [email]);
+    // Check if user exists by email or provider_id
+    let existingUserQuery = 'SELECT * FROM users WHERE email = $1';
+    let existingUserResult = await client.query(existingUserQuery, [email]);
+
+    // If not found by email and we have a provider_id (sub), try that
+    if (existingUserResult.rows.length === 0 && sub) {
+      existingUserQuery = 'SELECT * FROM users WHERE provider_id = $1';
+      existingUserResult = await client.query(existingUserQuery, [sub]);
+    }
 
     let user;
     let isNew = false;
 
     if (existingUserResult.rows.length > 0) {
-      // Existing user
+      // Existing user - update provider_id if not set
       user = existingUserResult.rows[0];
+      
+      if (!user.provider_id && sub) {
+        const updateQuery = 'UPDATE users SET provider_id = $1 WHERE user_id = $2 RETURNING *';
+        const updateResult = await client.query(updateQuery, [sub, user.user_id]);
+        user = updateResult.rows[0];
+        console.log(`✅ Updated provider_id for existing user: ${email}`);
+      }
+      
       isNew = false;
     } else {
       // New user - create wallet and user account
@@ -68,14 +82,15 @@ async function login(req, res) {
       const insertUserQuery = `
         INSERT INTO users (
           user_id, email, name, profile_pic, wallet_address, 
-          role, rep, privy_user_id
+          role, rep, privy_user_id, provider_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *
       `;
       
       const userId = uuidv4();
-      const privyUserId = sub || `nextauth_${userId}`; // Use sub from JWT or generate one
+      const providerId = sub || null; // Use sub from JWT as provider_id
+      const privyUserId = sub || `nextauth_${userId}`; // Keep for backwards compatibility
       
       const insertResult = await client.query(insertUserQuery, [
         userId,
@@ -85,7 +100,8 @@ async function login(req, res) {
         walletAddress,
         'citizen',
         100,
-        privyUserId
+        privyUserId,
+        providerId
       ]);
       
       user = insertResult.rows[0];
@@ -115,6 +131,7 @@ async function login(req, res) {
       is_new: isNew,
       user: {
         user_id: user.user_id,
+        provider_id: user.provider_id,
         email: user.email,
         name: user.name,
         profile_pic: user.profile_pic,
