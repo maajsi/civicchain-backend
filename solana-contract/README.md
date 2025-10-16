@@ -279,6 +279,16 @@ solana airdrop 2
 ### "Program ID mismatch"
 Ensure the program ID in `lib.rs` and `Anchor.toml` match the deployed program ID.
 
+### Stack size errors (SPL Token 2022)
+If you encounter stack size errors like:
+```
+Error: Function _ZN14spl_token_20229extension... Stack offset of 4264 exceeded max offset of 4096
+```
+
+**Solution**: This is caused by `anchor-spl` dependency pulling in `spl-token-2022`. Since our contract doesn't use SPL tokens, we've removed this dependency. If you need to add it back, ensure you're using a version without this issue or use the older `spl-token` crate instead.
+
+The current `Cargo.toml` only includes `anchor-lang = "0.29.0"` which is sufficient for our contract.
+
 ### Build errors
 ```bash
 anchor clean
