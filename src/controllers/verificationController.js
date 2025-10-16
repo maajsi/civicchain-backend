@@ -141,7 +141,8 @@ async function verifyIssue(req, res) {
     }
 
     // Record verification on blockchain
-    const blockchainTxHash = await recordVerificationOnChain(id, userId);
+    const verifierWallet = req.user.wallet_address;
+    const blockchainTxHash = await recordVerificationOnChain(id, verifierWallet, reporter.wallet_address);
 
     // Update reputations on blockchain
     await updateReputationOnChain(verifier.wallet_address, verifierNewRep);

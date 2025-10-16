@@ -5,9 +5,11 @@ const {
   Transaction,
   SystemProgram,
   sendAndConfirmTransaction,
-  LAMPORTS_PER_SOL
+  LAMPORTS_PER_SOL,
+  TransactionInstruction
 } = require('@solana/web3.js');
-const { Program, AnchorProvider, web3, BN } = require('@coral-xyz/anchor');
+const { Program, AnchorProvider, web3, BN, Wallet } = require('@coral-xyz/anchor');
+const { createHash } = require('crypto');
 require('dotenv').config();
 
 // Load master wallet
@@ -27,10 +29,51 @@ const connection = new Connection(
   'confirmed'
 );
 
-// Program ID will be set after deployment
+// Program ID from deployed contract
 const PROGRAM_ID = process.env.SOLANA_PROGRAM_ID 
   ? new PublicKey(process.env.SOLANA_PROGRAM_ID) 
   : null;
+
+// Load IDL for the program
+const IDL = require('../../solana-contract/target/idl/civicchain.json');
+
+/**
+ * Get PDA for user account
+ * @param {PublicKey} userPubkey - User's public key
+ * @returns {Promise<[PublicKey, number]>} PDA and bump seed
+ */
+async function getUserPDA(userPubkey) {
+  return await PublicKey.findProgramAddress(
+    [Buffer.from('user'), userPubkey.toBuffer()],
+    PROGRAM_ID
+  );
+}
+
+/**
+ * Get PDA for issue account
+ * @param {Buffer} issueHash - Issue hash (32 bytes)
+ * @returns {Promise<[PublicKey, number]>} PDA and bump seed
+ */
+async function getIssuePDA(issueHash) {
+  return await PublicKey.findProgramAddress(
+    [Buffer.from('issue'), issueHash],
+    PROGRAM_ID
+  );
+}
+
+/**
+ * Create an Anchor program instance
+ * @param {Keypair} wallet - Wallet to use as provider
+ * @returns {Program} Anchor program instance
+ */
+function getProgram(wallet) {
+  const provider = new AnchorProvider(
+    connection,
+    new Wallet(wallet),
+    { commitment: 'confirmed' }
+  );
+  return new Program(IDL, PROGRAM_ID, provider);
+}
 
 /**
  * Create a new user account on-chain
@@ -46,11 +89,42 @@ async function createUserOnChain(walletAddress, initialRep = 100, role = 'citize
       return `mock_user_tx_${Date.now()}`;
     }
 
-    // For now, return mock transaction
-    // This will be replaced with actual Anchor program call after contract deployment
-    const mockTxHash = `user_${walletAddress.substring(0, 8)}_${Date.now()}`;
-    console.log(`📝 Created user on-chain: ${mockTxHash}`);
-    return mockTxHash;
+    if (!masterKeypair) {
+      throw new Error('Master wallet not configured');
+    }
+
+    const userPubkey = new PublicKey(walletAddress);
+    const [userPDA, bump] = await getUserPDA(userPubkey);
+
+    // Check if user account already exists
+    try {
+      const accountInfo = await connection.getAccountInfo(userPDA);
+      if (accountInfo) {
+        console.log(`ℹ️  User account already exists for ${walletAddress}`);
+        return null; // User already initialized
+      }
+    } catch (error) {
+      // Account doesn't exist, proceed with creation
+    }
+
+    const program = getProgram(masterKeypair);
+
+    // Convert role to enum
+    const roleEnum = role === 'government' ? { government: {} } : { citizen: {} };
+
+    // Call initialize_user instruction
+    const tx = await program.methods
+      .initializeUser(initialRep, roleEnum)
+      .accounts({
+        userAccount: userPDA,
+        authority: userPubkey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([]) // User will sign via Privy
+      .rpc();
+
+    console.log(`⛓️  Created user on-chain: ${tx}`);
+    return tx;
 
   } catch (error) {
     console.error('Error creating user on-chain:', error);
@@ -70,11 +144,49 @@ async function createIssueOnChain(issueData) {
       return `mock_issue_tx_${Date.now()}`;
     }
 
-    // For now, return mock transaction
-    // This will be replaced with actual Anchor program call
-    const mockTxHash = `issue_${issueData.issue_id.substring(0, 8)}_${Date.now()}`;
-    console.log(`📝 Created issue on-chain: ${mockTxHash}`);
-    return mockTxHash;
+    if (!masterKeypair) {
+      throw new Error('Master wallet not configured');
+    }
+
+    const reporterPubkey = new PublicKey(issueData.wallet_address);
+    
+    // Create issue hash from issue_id
+    const issueHash = createHash('sha256')
+      .update(issueData.issue_id)
+      .digest();
+
+    const [issuePDA, bump] = await getIssuePDA(issueHash);
+    const [userPDA, userBump] = await getUserPDA(reporterPubkey);
+
+    const program = getProgram(masterKeypair);
+
+    // Map category to enum
+    const categoryMap = {
+      'pothole': { pothole: {} },
+      'garbage': { garbage: {} },
+      'streetlight': { streetlight: {} },
+      'water': { water: {} },
+      'other': { other: {} }
+    };
+    const categoryEnum = categoryMap[issueData.category] || { other: {} };
+
+    // Calculate priority (0-100 range to 0-255)
+    const priority = Math.min(255, Math.floor(issueData.priority_score * 2.55));
+
+    // Call create_issue instruction
+    const tx = await program.methods
+      .createIssue(Array.from(issueHash), categoryEnum, priority)
+      .accounts({
+        issueAccount: issuePDA,
+        userAccount: userPDA,
+        authority: reporterPubkey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([]) // Reporter will sign via Privy
+      .rpc();
+
+    console.log(`⛓️  Created issue on-chain: ${tx}`);
+    return tx;
 
   } catch (error) {
     console.error('Error creating issue on-chain:', error);
@@ -85,21 +197,53 @@ async function createIssueOnChain(issueData) {
 /**
  * Record a vote on-chain
  * @param {string} issueId - Issue ID
- * @param {string} voterId - Voter's user ID
+ * @param {string} voterId - Voter's wallet address
+ * @param {string} reporterAddress - Reporter's wallet address
  * @param {string} voteType - 'upvote' or 'downvote'
  * @returns {Promise<string>} Transaction signature
  */
-async function recordVoteOnChain(issueId, voterId, voteType) {
+async function recordVoteOnChain(issueId, voterId, reporterAddress, voteType) {
   try {
     if (!PROGRAM_ID) {
       console.warn('⚠️  Solana program not deployed, skipping on-chain vote recording');
       return `mock_vote_tx_${Date.now()}`;
     }
 
-    // For now, return mock transaction
-    const mockTxHash = `vote_${voteType}_${issueId.substring(0, 8)}_${Date.now()}`;
-    console.log(`📝 Recorded ${voteType} on-chain: ${mockTxHash}`);
-    return mockTxHash;
+    if (!masterKeypair) {
+      throw new Error('Master wallet not configured');
+    }
+
+    const voterPubkey = new PublicKey(voterId);
+    const reporterPubkey = new PublicKey(reporterAddress);
+
+    // Create issue hash from issue_id
+    const issueHash = createHash('sha256')
+      .update(issueId)
+      .digest();
+
+    const [issuePDA] = await getIssuePDA(issueHash);
+    const [reporterPDA] = await getUserPDA(reporterPubkey);
+    const [voterPDA] = await getUserPDA(voterPubkey);
+
+    const program = getProgram(masterKeypair);
+
+    // Map vote type to enum
+    const voteTypeEnum = voteType === 'upvote' ? { upvote: {} } : { downvote: {} };
+
+    // Call record_vote instruction
+    const tx = await program.methods
+      .recordVote(voteTypeEnum)
+      .accounts({
+        issueAccount: issuePDA,
+        reporterAccount: reporterPDA,
+        voterAccount: voterPDA,
+        voter: voterPubkey,
+      })
+      .signers([]) // Voter will sign via Privy
+      .rpc();
+
+    console.log(`⛓️  Recorded ${voteType} on-chain: ${tx}`);
+    return tx;
 
   } catch (error) {
     console.error('Error recording vote on-chain:', error);
@@ -110,20 +254,49 @@ async function recordVoteOnChain(issueId, voterId, voteType) {
 /**
  * Record verification on-chain
  * @param {string} issueId - Issue ID
- * @param {string} verifierId - Verifier's user ID
+ * @param {string} verifierId - Verifier's wallet address
+ * @param {string} reporterAddress - Reporter's wallet address
  * @returns {Promise<string>} Transaction signature
  */
-async function recordVerificationOnChain(issueId, verifierId) {
+async function recordVerificationOnChain(issueId, verifierId, reporterAddress) {
   try {
     if (!PROGRAM_ID) {
       console.warn('⚠️  Solana program not deployed, skipping on-chain verification');
       return `mock_verify_tx_${Date.now()}`;
     }
 
-    // For now, return mock transaction
-    const mockTxHash = `verify_${issueId.substring(0, 8)}_${Date.now()}`;
-    console.log(`📝 Recorded verification on-chain: ${mockTxHash}`);
-    return mockTxHash;
+    if (!masterKeypair) {
+      throw new Error('Master wallet not configured');
+    }
+
+    const verifierPubkey = new PublicKey(verifierId);
+    const reporterPubkey = new PublicKey(reporterAddress);
+
+    // Create issue hash from issue_id
+    const issueHash = createHash('sha256')
+      .update(issueId)
+      .digest();
+
+    const [issuePDA] = await getIssuePDA(issueHash);
+    const [reporterPDA] = await getUserPDA(reporterPubkey);
+    const [verifierPDA] = await getUserPDA(verifierPubkey);
+
+    const program = getProgram(masterKeypair);
+
+    // Call record_verification instruction
+    const tx = await program.methods
+      .recordVerification()
+      .accounts({
+        issueAccount: issuePDA,
+        reporterAccount: reporterPDA,
+        verifierAccount: verifierPDA,
+        verifier: verifierPubkey,
+      })
+      .signers([]) // Verifier will sign via Privy
+      .rpc();
+
+    console.log(`⛓️  Recorded verification on-chain: ${tx}`);
+    return tx;
 
   } catch (error) {
     console.error('Error recording verification on-chain:', error);
@@ -136,19 +309,57 @@ async function recordVerificationOnChain(issueId, verifierId) {
  * @param {string} issueId - Issue ID
  * @param {string} newStatus - New status
  * @param {string} governmentWallet - Government user's wallet
+ * @param {string} reporterAddress - Reporter's wallet address
  * @returns {Promise<string>} Transaction signature
  */
-async function updateIssueStatusOnChain(issueId, newStatus, governmentWallet) {
+async function updateIssueStatusOnChain(issueId, newStatus, governmentWallet, reporterAddress) {
   try {
     if (!PROGRAM_ID) {
       console.warn('⚠️  Solana program not deployed, skipping on-chain status update');
       return `mock_status_tx_${Date.now()}`;
     }
 
-    // For now, return mock transaction
-    const mockTxHash = `status_${newStatus}_${issueId.substring(0, 8)}_${Date.now()}`;
-    console.log(`📝 Updated issue status on-chain: ${mockTxHash}`);
-    return mockTxHash;
+    if (!masterKeypair) {
+      throw new Error('Master wallet not configured');
+    }
+
+    const governmentPubkey = new PublicKey(governmentWallet);
+    const reporterPubkey = new PublicKey(reporterAddress);
+
+    // Create issue hash from issue_id
+    const issueHash = createHash('sha256')
+      .update(issueId)
+      .digest();
+
+    const [issuePDA] = await getIssuePDA(issueHash);
+    const [reporterPDA] = await getUserPDA(reporterPubkey);
+    const [governmentPDA] = await getUserPDA(governmentPubkey);
+
+    const program = getProgram(masterKeypair);
+
+    // Map status to enum
+    const statusMap = {
+      'open': { open: {} },
+      'in_progress': { inProgress: {} },
+      'resolved': { resolved: {} },
+      'closed': { closed: {} }
+    };
+    const statusEnum = statusMap[newStatus] || { open: {} };
+
+    // Call update_issue_status instruction
+    const tx = await program.methods
+      .updateIssueStatus(statusEnum)
+      .accounts({
+        issueAccount: issuePDA,
+        reporterAccount: reporterPDA,
+        governmentAccount: governmentPDA,
+        government: governmentPubkey,
+      })
+      .signers([]) // Government will sign via Privy
+      .rpc();
+
+    console.log(`⛓️  Updated issue status on-chain: ${tx}`);
+    return tx;
 
   } catch (error) {
     console.error('Error updating issue status on-chain:', error);
@@ -169,10 +380,27 @@ async function updateReputationOnChain(walletAddress, newRep) {
       return `mock_rep_tx_${Date.now()}`;
     }
 
-    // For now, return mock transaction
-    const mockTxHash = `rep_${walletAddress.substring(0, 8)}_${Date.now()}`;
-    console.log(`📝 Updated reputation on-chain: ${mockTxHash}`);
-    return mockTxHash;
+    if (!masterKeypair) {
+      throw new Error('Master wallet not configured');
+    }
+
+    const userPubkey = new PublicKey(walletAddress);
+    const [userPDA] = await getUserPDA(userPubkey);
+
+    const program = getProgram(masterKeypair);
+
+    // Call update_reputation instruction
+    const tx = await program.methods
+      .updateReputation(newRep)
+      .accounts({
+        userAccount: userPDA,
+        authority: masterKeypair.publicKey, // Admin authority
+      })
+      .signers([masterKeypair])
+      .rpc();
+
+    console.log(`⛓️  Updated reputation on-chain: ${tx}`);
+    return tx;
 
   } catch (error) {
     console.error('Error updating reputation on-chain:', error);
@@ -243,6 +471,10 @@ async function checkAndRefillWallet(publicKeyString, threshold = 0.01) {
 module.exports = {
   connection,
   masterKeypair,
+  PROGRAM_ID,
+  getUserPDA,
+  getIssuePDA,
+  getProgram,
   createUserOnChain,
   createIssueOnChain,
   recordVoteOnChain,
