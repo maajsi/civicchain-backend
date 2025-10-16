@@ -19,11 +19,10 @@ async function classifyImageWithAI(imagePath) {
     const roboflowApiKey = process.env.ROBOFLOW_API_KEY;
     const response = await axios({
       method: 'POST',
-      url: `${aiServiceUrl}${roboflowEndpoint}`,
+      url: `${aiServiceUrl}${roboflowEndpoint}?api_key=${roboflowApiKey}`,
       data: imageBase64,
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        ...(roboflowApiKey ? { 'Authorization': `Bearer ${roboflowApiKey}` } : {})
+        'Content-Type': 'application/x-www-form-urlencoded'
       },
       timeout: 30000 // 30 second timeout
     });
