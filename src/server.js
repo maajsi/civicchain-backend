@@ -58,8 +58,6 @@ app.use((req, res) => {
   });
 });
 
-// Sentry error handler MUST be before any other error middleware
-app.use(Sentry.Handlers.errorHandler());
 
 // Custom error handler
 app.use((err, req, res, next) => {
