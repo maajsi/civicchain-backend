@@ -13,6 +13,15 @@ async function runMigrations() {
   try {
     console.log('🚀 Starting database migrations...');
 
+    // Create schema_migrations table if it doesn't exist
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version VARCHAR(255) PRIMARY KEY,
+        applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Ensured schema_migrations table exists');
+
     // Get list of migration files
     const migrationsDir = path.join(__dirname, '../../migrations');
     const migrationFiles = fs.readdirSync(migrationsDir)
@@ -40,6 +49,12 @@ async function runMigrations() {
       const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
       
       await client.query(migrationSQL);
+      
+      // Record the migration as applied
+      await client.query(
+        'INSERT INTO schema_migrations (version) VALUES ($1)',
+        [version]
+      );
       
       console.log(`✅ Successfully applied: ${file}`);
     }
