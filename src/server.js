@@ -5,7 +5,6 @@ const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
 const Sentry = require('@sentry/node');
-const { ProfilingIntegration } = require('@sentry/profiling-node');
 require('dotenv').config();
 
 // Create Express app first
@@ -23,11 +22,6 @@ const adminRoutes = require('./routes/adminRoutes');
 const pool = require('./config/database');
 
 const PORT = process.env.PORT || 3000;
-
-// Sentry request handler MUST be the first middleware
-app.use(Sentry.Handlers.requestHandler());
-// TracingHandler creates a trace for every incoming request
-app.use(Sentry.Handlers.tracingHandler());
 
 // Middleware
 app.use(cors({
