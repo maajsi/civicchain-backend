@@ -1,0 +1,680 @@
+{
+  "address": "FZ1TLUm7HMd87DeKgTxRAUdCKPLsoVGt3zy4u57TBLbx",
+  "metadata": {
+    "name": "civicchain",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "CivicChain Solana Smart Contract"
+  },
+  "instructions": [
+    {
+      "name": "create_issue",
+      "docs": [
+        "Create a new issue"
+      ],
+      "discriminator": [
+        177,
+        159,
+        162,
+        73,
+        188,
+        253,
+        190,
+        63
+      ],
+      "accounts": [
+        {
+          "name": "issue_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  115,
+                  115,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "issue_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "issue_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "category",
+          "type": {
+            "defined": {
+              "name": "IssueCategory"
+            }
+          }
+        },
+        {
+          "name": "priority",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "initialize_user",
+      "docs": [
+        "Initialize a new user account"
+      ],
+      "discriminator": [
+        111,
+        17,
+        185,
+        250,
+        60,
+        122,
+        38,
+        254
+      ],
+      "accounts": [
+        {
+          "name": "user_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "authority"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "initial_rep",
+          "type": "u32"
+        },
+        {
+          "name": "role",
+          "type": {
+            "defined": {
+              "name": "UserRole"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "record_verification",
+      "docs": [
+        "Record a verification"
+      ],
+      "discriminator": [
+        179,
+        127,
+        50,
+        99,
+        1,
+        78,
+        32,
+        190
+      ],
+      "accounts": [
+        {
+          "name": "issue_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  115,
+                  115,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "issue_account.issue_hash",
+                "account": "IssueAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "verifier_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "verifier"
+              }
+            ]
+          }
+        },
+        {
+          "name": "verifier",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "record_vote",
+      "docs": [
+        "Record a vote on an issue"
+      ],
+      "discriminator": [
+        184,
+        0,
+        179,
+        29,
+        33,
+        23,
+        130,
+        220
+      ],
+      "accounts": [
+        {
+          "name": "issue_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  115,
+                  115,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "issue_account.issue_hash",
+                "account": "IssueAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "reporter_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "reporter_account.wallet_address",
+                "account": "UserAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "voter_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "voter"
+              }
+            ]
+          }
+        },
+        {
+          "name": "voter",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "vote_type",
+          "type": {
+            "defined": {
+              "name": "VoteType"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_issue_status",
+      "docs": [
+        "Update issue status (government only)"
+      ],
+      "discriminator": [
+        85,
+        140,
+        122,
+        9,
+        52,
+        72,
+        168,
+        56
+      ],
+      "accounts": [
+        {
+          "name": "issue_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  115,
+                  115,
+                  117,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "issue_account.issue_hash",
+                "account": "IssueAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "government_account",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "government"
+              }
+            ]
+          }
+        },
+        {
+          "name": "government",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_status",
+          "type": {
+            "defined": {
+              "name": "IssueStatus"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "update_reputation",
+      "docs": [
+        "Update user reputation"
+      ],
+      "discriminator": [
+        194,
+        220,
+        43,
+        201,
+        54,
+        209,
+        49,
+        178
+      ],
+      "accounts": [
+        {
+          "name": "user_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user_account.wallet_address",
+                "account": "UserAccount"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "Authority that can update reputation (could be program authority)"
+          ],
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_rep",
+          "type": "u32"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "IssueAccount",
+      "discriminator": [
+        215,
+        240,
+        148,
+        3,
+        69,
+        128,
+        32,
+        63
+      ]
+    },
+    {
+      "name": "UserAccount",
+      "discriminator": [
+        211,
+        33,
+        136,
+        16,
+        186,
+        110,
+        242,
+        127
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow occurred"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidStatus",
+      "msg": "Invalid status for this operation"
+    },
+    {
+      "code": 6002,
+      "name": "Unauthorized",
+      "msg": "Unauthorized: Only government users can perform this action"
+    }
+  ],
+  "types": [
+    {
+      "name": "IssueAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "issue_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "reporter",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "IssueStatus"
+              }
+            }
+          },
+          {
+            "name": "category",
+            "type": {
+              "defined": {
+                "name": "IssueCategory"
+              }
+            }
+          },
+          {
+            "name": "priority",
+            "type": "u8"
+          },
+          {
+            "name": "upvotes",
+            "type": "u32"
+          },
+          {
+            "name": "downvotes",
+            "type": "u32"
+          },
+          {
+            "name": "verifications",
+            "type": "u32"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IssueCategory",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Pothole"
+          },
+          {
+            "name": "Garbage"
+          },
+          {
+            "name": "Streetlight"
+          },
+          {
+            "name": "Water"
+          },
+          {
+            "name": "Other"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IssueStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "InProgress"
+          },
+          {
+            "name": "Resolved"
+          },
+          {
+            "name": "Closed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserAccount",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "wallet_address",
+            "type": "pubkey"
+          },
+          {
+            "name": "reputation",
+            "type": "u32"
+          },
+          {
+            "name": "role",
+            "type": {
+              "defined": {
+                "name": "UserRole"
+              }
+            }
+          },
+          {
+            "name": "total_issues",
+            "type": "u32"
+          },
+          {
+            "name": "total_verifications",
+            "type": "u32"
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserRole",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Citizen"
+          },
+          {
+            "name": "Government"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VoteType",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Upvote"
+          },
+          {
+            "name": "Downvote"
+          }
+        ]
+      }
+    }
+  ]
+}
