@@ -7,6 +7,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "migrate": "node src/db/migrations/runMigrations.js",
+    "seed": "node scripts/generate-sample-data.js",
+    "check-env": "./check-env.sh",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": ["civic", "blockchain", "solana", "governance"],
