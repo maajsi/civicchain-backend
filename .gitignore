@@ -33,3 +33,4 @@ coverage/
 *.d
 *.rlib
 debug/
+target/

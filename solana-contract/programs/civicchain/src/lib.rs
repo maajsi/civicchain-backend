@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("874ACJUbeRDKucRxCrnxoVqseYsPfbzNLY94131grpFk");
+declare_id!("FZ1TLUm7HMd87DeKgTxRAUdCKPLsoVGt3zy4u57TBLbx");
 
 #[program]
 pub mod civicchain {

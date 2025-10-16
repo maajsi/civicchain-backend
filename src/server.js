@@ -1,3 +1,5 @@
+require("./instrument");
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -9,22 +11,7 @@ require('dotenv').config();
 // Create Express app first
 const app = express();
 
-// Initialize Sentry FIRST, before any other middleware
-Sentry.init({
-  dsn: process.env.SENTRY_DSN || "https://441463e78a1a3b9048923c1cb9b44ebd@o4510188445958144.ingest.us.sentry.io/4510188480102400",
-  integrations: [
-    // Automatically instrument Node.js libraries and frameworks
-    new Sentry.Integrations.Http({ tracing: true }),
-    new Sentry.Integrations.Express({ app }),
-    new ProfilingIntegration(),
-  ],
-  // Performance Monitoring
-  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-  // Profiling
-  profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
-  // Environment
-  environment: process.env.NODE_ENV || 'development',
-});
+Sentry.setupExpressErrorHandler(app);
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
