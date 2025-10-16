@@ -27,19 +27,24 @@ async function login(req, res) {
     let decoded;
     try {
       decoded = jwt.verify(jwt_token, process.env.JWT_SECRET);
+      console.log('✅ JWT verified successfully:', { email: decoded.email, sub: decoded.sub });
     } catch (jwtError) {
+      console.error('❌ JWT verification failed:', jwtError.message);
       return res.status(401).json({
         success: false,
-        error: 'Invalid or expired JWT token'
+        error: 'Invalid or expired JWT token',
+        details: jwtError.message
       });
     }
 
-    const { email, name, picture } = decoded;
+    // Extract user data from JWT payload
+    // NextAuth JWTs typically have: email, name, picture, sub (user ID), iat, exp
+    const { email, name, picture, sub } = decoded;
 
-    if (!email || !name) {
+    if (!email) {
       return res.status(400).json({
         success: false,
-        error: 'Email and name are required in JWT'
+        error: 'Email is required in JWT payload'
       });
     }
 
@@ -70,12 +75,12 @@ async function login(req, res) {
       `;
       
       const userId = uuidv4();
-      const privyUserId = `privy_${userId}`; // Placeholder for Privy integration
+      const privyUserId = sub || `nextauth_${userId}`; // Use sub from JWT or generate one
       
       const insertResult = await client.query(insertUserQuery, [
         userId,
         email,
-        name,
+        name || 'User', // Default name if not provided
         picture || null,
         walletAddress,
         'citizen',
