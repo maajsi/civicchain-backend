@@ -15,13 +15,15 @@ async function classifyImageWithAI(imagePath) {
     // Read image and convert to base64
     const imageBase64 = fs.readFileSync(imagePath, { encoding: 'base64' });
     
-    // Call Roboflow API
+    // Call Roboflow API with API key
+    const roboflowApiKey = process.env.ROBOFLOW_API_KEY;
     const response = await axios({
       method: 'POST',
       url: `${aiServiceUrl}${roboflowEndpoint}`,
       data: imageBase64,
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(roboflowApiKey ? { 'Authorization': `Bearer ${roboflowApiKey}` } : {})
       },
       timeout: 30000 // 30 second timeout
     });
