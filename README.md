@@ -2,6 +2,16 @@
 
 CivicChain is an AI-powered, blockchain-backed civic issue management platform designed for transparent, trust-based governance. This repository contains the backend API system built with Node.js, Express, PostgreSQL with PostGIS, and Solana blockchain integration.
 
+## 📑 Documentation Index
+
+- **[QUICKSTART.md](QUICKSTART.md)** - Get started in 5 minutes
+- **[API_DOCUMENTATION.md](API_DOCUMENTATION.md)** - Complete API reference
+- **[EXAMPLES.md](EXAMPLES.md)** - Request/response examples
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Production deployment guide
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - How to contribute
+- **[SMART_CONTRACT_SPEC.md](SMART_CONTRACT_SPEC.md)** - Solana contract specification
+- **[IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md)** - What's implemented
+
 ## 🚀 Features
 
 - **User Authentication**: Google OAuth integration with JWT-based authentication
