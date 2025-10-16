@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { fundWallet, createUserOnChain } = require('../services/solanaService');
-const { createCustodialWallet } = require('../services/privyService');
+const { createCustodialWallet, getPrivyWallet } = require('../services/privyService');
 require('dotenv').config();
 
 /**
@@ -76,69 +76,95 @@ async function login(req, res) {
       isNew = false;
       console.log(`✅ Existing user logged in: ${email}`);
     } else {
-      // New user - create Privy custodial wallet and user account
       const userId = uuidv4();
-      // Create custodial wallet using Privy
-      let walletAddress, privyUserId;
+      let walletAddress;
+      let privyUserId;
+
       try {
         const privyWallet = await createCustodialWallet(userId, email);
         walletAddress = privyWallet.walletAddress;
         privyUserId = privyWallet.privyUserId;
         console.log(`✅ Created Privy custodial wallet: ${walletAddress}`);
       } catch (privyError) {
-        console.error('❌ Failed to create Privy wallet:', privyError);
-        return res.status(500).json({
-          success: false,
-          error: 'Failed to create custodial wallet',
-          details: privyError.message
-        });
+        if (privyError.message?.includes('existing user')) {
+          const match = privyError.message.match(/(did:privy:[^\s]+)/);
+          if (!match) {
+            throw privyError;
+          }
+          privyUserId = match[1];
+          walletAddress = await getPrivyWallet(privyUserId);
+          console.log(`ℹ️  Reusing existing Privy wallet: ${walletAddress}`);
+        } else {
+          console.error('❌ Failed to create Privy wallet:', privyError);
+          return res.status(500).json({
+            success: false,
+            error: 'Failed to create custodial wallet',
+            details: privyError.message
+          });
+        }
       }
-      // Create user in database
+
       const insertUserQuery = `
         INSERT INTO users (
-          user_id, email, name, profile_pic, wallet_address, 
+          user_id, email, name, profile_pic, wallet_address,
           role, rep, privy_user_id, provider_id
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *
       `;
-      const providerId = sub || null; // Use sub from JWT as provider_id
-      // privyUserId already set above
-      const insertResult = await client.query(insertUserQuery, [
-        userId,
-        email,
-        name || 'User', // Default name if not provided
-        picture || null,
-        walletAddress,
-        'citizen',
-        100,
-        privyUserId,
-        providerId
-      ]);
-      user = insertResult.rows[0];
-      isNew = true;
 
-      // Fund wallet with devnet SOL from master wallet
-      try {
-        const txSignature = await fundWallet(walletAddress, 0.05);
-        console.log(`💰 Funded new wallet ${walletAddress} with 0.05 SOL. Tx: ${txSignature}`);
-      } catch (fundError) {
-        console.warn('⚠️  Failed to fund wallet:', fundError.message);
-        // Continue anyway - wallet funding is not critical for development
-      }
+      const providerId = sub || null;
 
-      // Create user on Solana blockchain
       try {
-        const blockchainTx = await createUserOnChain(walletAddress, 100, 'citizen');
-        if (blockchainTx) {
-          console.log(`⛓️  Created user on-chain: ${blockchainTx}`);
+        const insertResult = await client.query(insertUserQuery, [
+          userId,
+          email,
+          name || 'User',
+          picture || null,
+          walletAddress,
+          'citizen',
+          100,
+          privyUserId,
+          providerId
+        ]);
+        user = insertResult.rows[0];
+        isNew = true;
+      } catch (insertError) {
+        if (insertError.code === '23505') {
+          const conflictResult = await client.query(
+            'SELECT * FROM users WHERE privy_user_id = $1',
+            [privyUserId]
+          );
+          if (!conflictResult.rows.length) {
+            throw insertError;
+          }
+          user = conflictResult.rows[0];
+          isNew = false;
+          console.log(`ℹ️  Detected concurrent login, using existing user: ${email}`);
+        } else {
+          throw insertError;
         }
-      } catch (blockchainError) {
-        console.warn('⚠️  Failed to create user on-chain:', blockchainError.message);
-        // Continue anyway - blockchain creation can be retried later
       }
 
-      console.log(`✅ New user created: ${email}`);
+      if (isNew) {
+        try {
+          const txSignature = await fundWallet(walletAddress, 0.05);
+          console.log(`💰 Funded new wallet ${walletAddress} with 0.05 SOL. Tx: ${txSignature}`);
+        } catch (fundError) {
+          console.warn('⚠️  Failed to fund wallet:', fundError.message);
+        }
+
+        try {
+          const blockchainTx = await createUserOnChain(walletAddress, 100, 'citizen');
+          if (blockchainTx) {
+            console.log(`🔗 User created on-chain. Tx: ${blockchainTx}`);
+          }
+        } catch (blockchainError) {
+          console.warn('⚠️  Failed to create user on-chain:', blockchainError.message);
+        }
+
+        console.log(`✅ New user created: ${email}`);
+      }
     }
 
     // Return response (no JWT generation here, NextAuth handles it)
