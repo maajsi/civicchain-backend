@@ -78,7 +78,6 @@ async function login(req, res) {
     } else {
       // New user - create Privy custodial wallet and user account
       const userId = uuidv4();
-      
       // Create custodial wallet using Privy
       let walletAddress, privyUserId;
       try {
@@ -94,7 +93,6 @@ async function login(req, res) {
           details: privyError.message
         });
       }
-      
       // Create user in database
       const insertUserQuery = `
         INSERT INTO users (
@@ -104,11 +102,8 @@ async function login(req, res) {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *
       `;
-      
-      const userId = uuidv4();
       const providerId = sub || null; // Use sub from JWT as provider_id
-      const privyUserId = sub || `nextauth_${userId}`; // Keep for backwards compatibility
-      
+      // privyUserId already set above
       const insertResult = await client.query(insertUserQuery, [
         userId,
         email,
@@ -120,7 +115,6 @@ async function login(req, res) {
         privyUserId,
         providerId
       ]);
-      
       user = insertResult.rows[0];
       isNew = true;
 
