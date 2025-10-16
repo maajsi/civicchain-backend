@@ -50,9 +50,9 @@ async function runMigrations() {
       
       await client.query(migrationSQL);
       
-      // Record the migration as applied
+      // Record the migration as applied (ignore if already exists)
       await client.query(
-        'INSERT INTO schema_migrations (version) VALUES ($1)',
+        'INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT DO NOTHING',
         [version]
       );
       
