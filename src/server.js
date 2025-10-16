@@ -2,7 +2,27 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
+const Sentry = require('@sentry/node');
+const { ProfilingIntegration } = require('@sentry/profiling-node');
 require('dotenv').config();
+
+// Initialize Sentry FIRST, before any other code
+Sentry.init({
+  dsn: process.env.SENTRY_DSN || "https://441463e78a1a3b9048923c1cb9b44ebd@o4510188445958144.ingest.us.sentry.io/4510188480102400",
+  integrations: [
+    // Performance monitoring
+    new Sentry.Integrations.Http({ tracing: true }),
+    new Sentry.Integrations.Express({ app: express() }),
+    // Profiling
+    new ProfilingIntegration(),
+  ],
+  // Performance Monitoring
+  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  // Profiling
+  profilesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
+  // Environment
+  environment: process.env.NODE_ENV || 'development',
+});
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -15,6 +35,11 @@ const pool = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Sentry request handler MUST be the first middleware
+app.use(Sentry.Handlers.requestHandler());
+// TracingHandler creates a trace for every incoming request
+app.use(Sentry.Handlers.tracingHandler());
 
 // Middleware
 app.use(cors({
@@ -51,7 +76,10 @@ app.use((req, res) => {
   });
 });
 
-// Error handler
+// Sentry error handler MUST be before any other error middleware
+app.use(Sentry.Handlers.errorHandler());
+
+// Custom error handler
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   

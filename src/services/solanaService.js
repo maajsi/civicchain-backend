@@ -34,8 +34,15 @@ const PROGRAM_ID = process.env.SOLANA_PROGRAM_ID
   ? new PublicKey(process.env.SOLANA_PROGRAM_ID) 
   : null;
 
-// Load IDL for the program
-const IDL = require('../../solana-contract/target/idl/civicchain.json');
+// Load IDL for the program (optional - make it non-blocking)
+let IDL = null;
+try {
+  IDL = require('../../solana-contract/target/idl/civicchain.json');
+  console.log('✅ Solana IDL loaded successfully');
+} catch (error) {
+  console.warn('⚠️  Solana IDL not found. Blockchain features will be limited.');
+  console.warn('   Build the contract with: cd solana-contract && anchor build');
+}
 
 /**
  * Get PDA for user account
@@ -67,6 +74,9 @@ async function getIssuePDA(issueHash) {
  * @returns {Program} Anchor program instance
  */
 function getProgram(wallet) {
+  if (!IDL || !PROGRAM_ID) {
+    throw new Error('Solana program not configured. IDL or Program ID missing.');
+  }
   const provider = new AnchorProvider(
     connection,
     new Wallet(wallet),
@@ -84,9 +94,9 @@ function getProgram(wallet) {
  */
 async function createUserOnChain(walletAddress, initialRep = 100, role = 'citizen') {
   try {
-    if (!PROGRAM_ID) {
-      console.warn('⚠️  Solana program not deployed, skipping on-chain user creation');
-      return `mock_user_tx_${Date.now()}`;
+    if (!IDL || !PROGRAM_ID) {
+      console.warn('⚠️  Solana program not configured, skipping on-chain user creation');
+      return null;
     }
 
     if (!masterKeypair) {

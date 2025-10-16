@@ -68,6 +68,9 @@ services:
       
       # CORS
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
+      
+      # Sentry
+      SENTRY_DSN: ${SENTRY_DSN:-https://441463e78a1a3b9048923c1cb9b44ebd@o4510188445958144.ingest.us.sentry.io/4510188480102400}
     ports:
       - "3000:3000"
     volumes:
