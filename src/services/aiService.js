@@ -76,6 +76,7 @@ function normalizeCategory(aiClass) {
     'pothole': 'pothole',
     'potholes': 'pothole',
     'garbage': 'garbage',
+    'garbage_overflow': 'garbage',
     'trash': 'garbage',
     'waste': 'garbage',
     'streetlight': 'streetlight',
@@ -83,6 +84,7 @@ function normalizeCategory(aiClass) {
     'light': 'streetlight',
     'water': 'water',
     'water_leak': 'water',
+    'waterlogging': 'water',
     'water_main': 'water'
   };
   
