@@ -40,37 +40,8 @@ services:
   backend:
     build: .
     container_name: civicchain-backend
-    environment:
-      # Database
-      DATABASE_URL: postgresql://root:civicchain@db:5432/civicchain
-      
-      # Server
-      PORT: 3000
-      NODE_ENV: production
-      
-      # JWT
-      JWT_SECRET: ${JWT_SECRET:-your_jwt_secret_change_in_production}
-      JWT_EXPIRES_IN: 7d
-      
-      # Solana
-      SOLANA_NETWORK: devnet
-      SOLANA_RPC_URL: https://api.devnet.solana.com
-      SOLANA_PROGRAM_ID: ${SOLANA_PROGRAM_ID:-}
-      MASTER_WALLET_PRIVATE_KEY: ${MASTER_WALLET_PRIVATE_KEY:-[]}
-      
-      # AI Service
-      AI_SERVICE_URL: http://ai-service:9001
-      ROBOFLOW_ENDPOINT: /civic-issue-yljwt/2
-      
-      # File Upload
-      MAX_FILE_SIZE: 10485760
-      ALLOWED_FILE_TYPES: image/jpeg,image/jpg,image/png
-      
-      # CORS
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3001}
-      
-      # Sentry
-      SENTRY_DSN: ${SENTRY_DSN:-https://441463e78a1a3b9048923c1cb9b44ebd@o4510188445958144.ingest.us.sentry.io/4510188480102400}
+    env_file:
+      - .env
     ports:
       - "3000:3000"
     volumes:
