@@ -38,9 +38,8 @@ async function createCustodialWallet(userId, email) {
           address: email
         }
       ],
-      createEmbeddedWallet: {
-        chainType: 'solana'
-      }
+      createEthereumWallet: false, 
+      createSolanaWallet: true 
     });
 
     // Get the Solana wallet from linked accounts
