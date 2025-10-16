@@ -8,10 +8,18 @@ async function getCurrentUser(req, res) {
   const client = await pool.connect();
   
   try {
-    const userId = req.user.user_id;
+    // Use email from JWT to look up user (consistent with /auth/login)
+    const email = req.user.email;
 
-    const query = 'SELECT * FROM users WHERE user_id = $1';
-    const result = await client.query(query, [userId]);
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email not found in token'
+      });
+    }
+
+    const query = 'SELECT * FROM users WHERE email = $1';
+    const result = await client.query(query, [email]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({
