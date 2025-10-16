@@ -279,6 +279,14 @@ solana airdrop 2
 ### "Program ID mismatch"
 Ensure the program ID in `lib.rs` and `Anchor.toml` match the deployed program ID.
 
+### "Stack size exceeded" or "unexpected cfg condition" warnings
+
+These warnings were resolved by:
+1. **Removing unused `anchor-spl` dependency** - Prevents spl-token-2022 stack size issues
+2. **Adding missing feature flags** - Adds `custom-heap`, `custom-panic`, and `anchor-debug` features to Cargo.toml
+
+The contract should now compile cleanly without warnings.
+
 ### Stack size errors (SPL Token 2022)
 If you encounter stack size errors like:
 ```
