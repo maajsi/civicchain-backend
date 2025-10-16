@@ -1,14 +1,15 @@
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
-const { Keypair } = require('@solana/web3.js');
 const { fundWallet, createUserOnChain } = require('../services/solanaService');
+const { createCustodialWallet } = require('../services/privyService');
 require('dotenv').config();
 
 /**
  * POST /auth/login
  * Handle NextAuth JWT verification, create or retrieve user
  * Expects JWT in request body, validates it, creates/returns user
+ * Uses Privy for custodial wallet management
  */
 async function login(req, res) {
   const client = await pool.connect();
@@ -73,10 +74,26 @@ async function login(req, res) {
       }
       
       isNew = false;
+      console.log(`✅ Existing user logged in: ${email}`);
     } else {
-      // New user - create wallet and user account
-      const newWallet = Keypair.generate();
-      const walletAddress = newWallet.publicKey.toString();
+      // New user - create Privy custodial wallet and user account
+      const userId = uuidv4();
+      
+      // Create custodial wallet using Privy
+      let walletAddress, privyUserId;
+      try {
+        const privyWallet = await createCustodialWallet(userId, email);
+        walletAddress = privyWallet.walletAddress;
+        privyUserId = privyWallet.privyUserId;
+        console.log(`✅ Created Privy custodial wallet: ${walletAddress}`);
+      } catch (privyError) {
+        console.error('❌ Failed to create Privy wallet:', privyError);
+        return res.status(500).json({
+          success: false,
+          error: 'Failed to create custodial wallet',
+          details: privyError.message
+        });
+      }
       
       // Create user in database
       const insertUserQuery = `
@@ -107,7 +124,7 @@ async function login(req, res) {
       user = insertResult.rows[0];
       isNew = true;
 
-      // Fund wallet with devnet SOL
+      // Fund wallet with devnet SOL from master wallet
       try {
         const txSignature = await fundWallet(walletAddress, 0.05);
         console.log(`💰 Funded new wallet ${walletAddress} with 0.05 SOL. Tx: ${txSignature}`);
@@ -119,10 +136,15 @@ async function login(req, res) {
       // Create user on Solana blockchain
       try {
         const blockchainTx = await createUserOnChain(walletAddress, 100, 'citizen');
-        console.log(`⛓️  Created user on-chain: ${blockchainTx}`);
+        if (blockchainTx) {
+          console.log(`⛓️  Created user on-chain: ${blockchainTx}`);
+        }
       } catch (blockchainError) {
         console.warn('⚠️  Failed to create user on-chain:', blockchainError.message);
+        // Continue anyway - blockchain creation can be retried later
       }
+
+      console.log(`✅ New user created: ${email}`);
     }
 
     // Return response (no JWT generation here, NextAuth handles it)
@@ -136,6 +158,7 @@ async function login(req, res) {
         name: user.name,
         profile_pic: user.profile_pic,
         wallet_address: user.wallet_address,
+        privy_user_id: user.privy_user_id,
         role: user.role,
         rep: user.rep,
         issues_reported: user.issues_reported,
@@ -151,7 +174,8 @@ async function login(req, res) {
     console.error('Login error:', error);
     return res.status(500).json({
       success: false,
-      error: 'Authentication failed'
+      error: 'Authentication failed',
+      details: error.message
     });
   } finally {
     client.release();
