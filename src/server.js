@@ -6,14 +6,16 @@ const Sentry = require('@sentry/node');
 const { ProfilingIntegration } = require('@sentry/profiling-node');
 require('dotenv').config();
 
-// Initialize Sentry FIRST, before any other code
+// Create Express app first
+const app = express();
+
+// Initialize Sentry FIRST, before any other middleware
 Sentry.init({
   dsn: process.env.SENTRY_DSN || "https://441463e78a1a3b9048923c1cb9b44ebd@o4510188445958144.ingest.us.sentry.io/4510188480102400",
   integrations: [
-    // Performance monitoring
+    // Automatically instrument Node.js libraries and frameworks
     new Sentry.Integrations.Http({ tracing: true }),
-    new Sentry.Integrations.Express({ app: express() }),
-    // Profiling
+    new Sentry.Integrations.Express({ app }),
     new ProfilingIntegration(),
   ],
   // Performance Monitoring
@@ -33,7 +35,6 @@ const adminRoutes = require('./routes/adminRoutes');
 // Import database pool to verify connection
 const pool = require('./config/database');
 
-const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Sentry request handler MUST be the first middleware
