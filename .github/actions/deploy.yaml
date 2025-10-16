@@ -1,0 +1,25 @@
+name: Deploy to Droplet with Docker Compose
+
+on:
+  push:
+    branches:
+      - slack-summary
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: SSH into Droplet, update code, and redeploy
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          script: |
+            cd slack-telegram
+            git pull origin slack-summary
+            docker compose down
+            docker compose up -d --build
