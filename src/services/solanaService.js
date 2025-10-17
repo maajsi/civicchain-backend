@@ -150,7 +150,7 @@ async function createUserOnChain(userPublicKey, initialRep, roleEnum, userPrivat
   try {
     console.log(`[createUserOnChain] Submitting tx with args`, {userPubStr, initialRep, normalizedRoleEnum});
     const tx = await program.methods
-      .initializeUser(userPubStr, initialRep, normalizedRoleEnum)
+      .initializeUser(pkey, initialRep, normalizedRoleEnum)
       .accounts({
         userAccount: userPDA,
         payer: masterKeypair.publicKey,
