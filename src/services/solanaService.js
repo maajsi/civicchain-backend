@@ -65,20 +65,22 @@ async function getUserSolanaWallet(privyUserId) {
   const user = await privy.users().get(privyUserId);
   if (!user) throw new Error('Privy: User not found: ' + privyUserId);
 
-  // Find the Solana embedded wallet in linked accounts
+  // Find the Solana wallet in linked accounts
+  // Note: Privy returns type "wallet" for embedded wallets, not "solana_embedded_wallet"
   const solanaWallet = user.linked_accounts.find(
-    account => account.type === 'solana_embedded_wallet'
+    account => (account.type === 'wallet' || account.type === 'solana_embedded_wallet')
+              && account.chain_type === 'solana'
   );
   
   if (!solanaWallet) {
-    throw new Error('Privy: No Solana embedded wallet found for user ' + privyUserId);
+    throw new Error('Privy: No Solana wallet found for user ' + privyUserId);
   }
 
   // Return wallet ID and address
   // Note: Privy does NOT expose private keys directly
   // You must use Privy's signing/transaction methods
   return {
-    walletId: solanaWallet.wallet_id,
+    walletId: solanaWallet.id || solanaWallet.wallet_id,
     address: solanaWallet.address,
     publicKey: new PublicKey(solanaWallet.address),
   };

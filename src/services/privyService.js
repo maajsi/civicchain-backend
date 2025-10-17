@@ -50,30 +50,17 @@ async function createCustodialWallet(userId, email) {
     });
 
     console.log(`✅ Created Privy user for ${email}: ${privyUser.id}`);
-    console.log('DEBUG: Privy user response:', JSON.stringify(privyUser, null, 2));
 
-    // Find the Solana embedded wallet in linked accounts
+    // Find the Solana wallet in linked accounts
+    // Note: Privy returns type "wallet" for embedded wallets, not "solana_embedded_wallet"
     const solanaWallet = privyUser.linked_accounts?.find(
-      account => account.type === 'solana_embedded_wallet'
+      account => (account.type === 'wallet' || account.type === 'solana_embedded_wallet') 
+                && account.chain_type === 'solana'
     );
 
     if (!solanaWallet) {
-      // Wallet might be in a separate field or need to be fetched
-      console.warn('⚠️  Wallet not in linked_accounts, fetching user again...');
-      const refreshedUser = await client.users().get(privyUser.id);
-      const refreshedWallet = refreshedUser.linked_accounts?.find(
-        account => account.type === 'solana_embedded_wallet'
-      );
-      
-      if (refreshedWallet) {
-        console.log(`✅ Found Solana wallet after refresh: ${refreshedWallet.address}`);
-        return {
-          walletAddress: refreshedWallet.address,
-          privyUserId: privyUser.id,
-          walletId: refreshedWallet.wallet_id
-        };
-      }
-      
+      console.error('❌ No Solana wallet found in response');
+      console.log('DEBUG: linked_accounts:', JSON.stringify(privyUser.linked_accounts, null, 2));
       throw new Error('No Solana wallet created for user');
     }
 
@@ -82,7 +69,7 @@ async function createCustodialWallet(userId, email) {
     return {
       walletAddress: solanaWallet.address,
       privyUserId: privyUser.id,
-      walletId: solanaWallet.wallet_id
+      walletId: solanaWallet.id // Note: it's "id" not "wallet_id" in the response
     };
   } catch (error) {
     console.error('❌ Error creating Privy custodial wallet:', error);
@@ -101,9 +88,11 @@ async function getPrivyWallet(privyUserId) {
   try {
     const privyUser = await client.users().get(privyUserId);
     
-    // Find Solana embedded wallet in linked accounts
+    // Find Solana wallet in linked accounts
+    // Note: Privy returns type "wallet" for embedded wallets
     const wallet = privyUser.linked_accounts?.find(
-      account => account.type === 'solana_embedded_wallet'
+      account => (account.type === 'wallet' || account.type === 'solana_embedded_wallet')
+                && account.chain_type === 'solana'
     );
 
     if (!wallet) {
@@ -112,7 +101,7 @@ async function getPrivyWallet(privyUserId) {
 
     return {
       address: wallet.address,
-      walletId: wallet.wallet_id
+      walletId: wallet.id || wallet.wallet_id
     };
   } catch (error) {
     console.error('❌ Error getting Privy wallet:', error);
