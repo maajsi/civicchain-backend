@@ -28,11 +28,18 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-const { PrivyClient } = require('@privy-io/node'); // Official Privy Node SDK
-const privy = new PrivyClient({
-  appId: process.env.PRIVY_APP_ID,
-  appSecret: process.env.PRIVY_APP_SECRET,
-});
+
+let privy;
+async function getPrivyClient() {
+  if (!privy) {
+    const module = await import('@privy-io/node');
+    privy = new module.PrivyClient({
+      appId: process.env.PRIVY_APP_ID,
+      appSecret: process.env.PRIVY_APP_SECRET,
+    });
+  }
+  return privy;
+}
 
 const MASTER_WALLET_PRIVATE_KEY = process.env.MASTER_WALLET_PRIVATE_KEY;
 if (!MASTER_WALLET_PRIVATE_KEY) throw new Error('MASTER_WALLET_PRIVATE_KEY missing from .env');
@@ -54,6 +61,7 @@ function getProgram(wallet) {
 // ---- Privy SDK: Get User's Solana Wallet ----
 async function getUserSolanaWallet(privyUserId) {
   // Get the user to access their linked accounts
+  const privy = await getPrivyClient();
   const user = await privy.users().get(privyUserId);
   if (!user) throw new Error('Privy: User not found: ' + privyUserId);
 
@@ -134,6 +142,7 @@ async function createUserOnChain(privyUserId, initialRep = 100, role = 'citizen'
   // Serialize and sign with Privy
   const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
   
+  const privy = await getPrivyClient();
   const signedTx = await privy.wallets().solana().signTransaction(walletId, {
     caip2: 'solana:devnet', // or 'solana:mainnet'
     params: {
@@ -183,6 +192,7 @@ async function createIssueOnChain(reporterPrivyUserId, issueId, category = 'othe
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
   
   const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  const privy = await getPrivyClient();
   const signedTx = await privy.wallets().solana().signTransaction(walletId, {
     caip2: 'solana:devnet',
     params: { transaction: serializedTx },
@@ -222,6 +232,7 @@ async function recordVoteOnChain(voterPrivyUserId, issueId, reporterPubkey, vote
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
   
   const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  const privy = await getPrivyClient();
   const signedTx = await privy.wallets().solana().signTransaction(walletId, {
     caip2: 'solana:devnet',
     params: { transaction: serializedTx },
@@ -258,6 +269,7 @@ async function recordVerificationOnChain(verifierPrivyUserId, issueId) {
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
   
   const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  const privy = await getPrivyClient();
   const signedTx = await privy.wallets().solana().signTransaction(walletId, {
     caip2: 'solana:devnet',
     params: { transaction: serializedTx },
@@ -302,6 +314,7 @@ async function updateIssueStatusOnChain(governmentPrivyUserId, issueId, newStatu
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
   
   const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  const privy = await getPrivyClient();
   const signedTx = await privy.wallets().solana().signTransaction(walletId, {
     caip2: 'solana:devnet',
     params: { transaction: serializedTx },
@@ -335,6 +348,7 @@ async function updateReputationOnChain(authorityPrivyUserId, userPubkey, newRep)
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
   
   const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  const privy = await getPrivyClient();
   const signedTx = await privy.wallets().solana().signTransaction(walletId, {
     caip2: 'solana:devnet',
     params: { transaction: serializedTx },
@@ -361,5 +375,5 @@ module.exports = {
   updateIssueStatusOnChain,
   updateReputationOnChain,
   getUserSolanaWallet,
-  privy, // Export for advanced usage
+  getPrivyClient, // Export for advanced usage
 };
