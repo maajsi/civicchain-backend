@@ -32,8 +32,8 @@ END $$;
 -- Create users table
 CREATE TABLE IF NOT EXISTS users (
   user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  privy_user_id VARCHAR(255) UNIQUE,
   wallet_address VARCHAR(255) UNIQUE NOT NULL,
+  private_key_encrypted TEXT,
   email VARCHAR(255) UNIQUE NOT NULL,
   name VARCHAR(255) NOT NULL,
   profile_pic TEXT,
@@ -44,8 +44,21 @@ CREATE TABLE IF NOT EXISTS users (
   total_upvotes INTEGER NOT NULL DEFAULT 0,
   verifications_done INTEGER NOT NULL DEFAULT 0,
   badges TEXT[] DEFAULT '{}',
+  provider_id VARCHAR(255),
   created_at TIMESTAMP DEFAULT NOW()
 );
+-- Add unique index on provider_id for fast lookups
+CREATE UNIQUE INDEX IF NOT EXISTS users_provider_id_idx 
+ON users(provider_id) 
+WHERE provider_id IS NOT NULL;
+
+-- Add index for faster lookups
+CREATE INDEX IF NOT EXISTS idx_users_wallet_address ON users(wallet_address);
+
+-- Add comments
+COMMENT ON COLUMN users.private_key_encrypted IS 'Encrypted Solana keypair private key (server-side storage)';
+COMMENT ON COLUMN users.wallet_address IS 'Solana public address derived from keypair';
+COMMENT ON COLUMN users.provider_id IS 'OAuth provider user ID (e.g., Google sub, Facebook ID)';
 
 -- Create issues table
 CREATE TABLE IF NOT EXISTS issues (
