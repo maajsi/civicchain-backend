@@ -126,7 +126,7 @@ async function reportIssue(req, res) {
 
     // Create blockchain transaction
     const blockchainTxHash = await createIssueOnChain(
-      user.private_key_encrypted,
+      user.private_key,
       issueId,
       category,
       priorityScore

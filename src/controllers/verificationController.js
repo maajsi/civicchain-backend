@@ -142,7 +142,7 @@ async function verifyIssue(req, res) {
 
     // Record verification on blockchain
     const blockchainTxHash = await recordVerificationOnChain(
-      req.user.private_key_encrypted,
+      req.user.private_key,
       issue.issue_id
     );
 

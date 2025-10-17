@@ -84,7 +84,7 @@ async function upvoteIssue(req, res) {
     // Record vote on blockchain
     const blockchainTxHash = await recordVoteOnChain(
       req.user.wallet_address,
-      req.user.private_key_encrypted,
+      req.user.private_key,
       issue.issue_id,
       reporter.wallet_address,
       'upvote'
@@ -216,7 +216,7 @@ async function downvoteIssue(req, res) {
     // Record vote on blockchain (downvote)
     const blockchainTxHash = await recordVoteOnChain(
       req.user.wallet_address,
-      req.user.private_key_encrypted,
+      req.user.private_key,
       issue.issue_id,
       reporter.wallet_address,
       'downvote'

@@ -33,6 +33,7 @@ const { createHash } = require('crypto');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
+const bs58 = require('bs58');
 
 // Configuration
 const MASTER_WALLET_PRIVATE_KEY = process.env.MASTER_WALLET_PRIVATE_KEY;
@@ -67,18 +68,18 @@ function generateUserWallet() {
   const keypair = Keypair.generate();
   return {
     publicKey: keypair.publicKey.toBase58(),
-    privateKey: JSON.stringify(Array.from(keypair.secretKey)),
+    privateKey: bs58.encode(keypair.secretKey),
   };
 }
 
 // ---- Load User Keypair from Private Key ----
-function loadUserKeypair(privateKeyJson) {
-  const secretKey = Uint8Array.from(JSON.parse(privateKeyJson));
+function loadUserKeypair(privateKeyBase58) {
+  const secretKey = bs58.decode(privateKeyBase58);
   return Keypair.fromSecretKey(secretKey);
 }
 
 // ---- Fund User Wallet ----
-async function fundWallet(toPublicKeyOrAddress, lamports = 0.05 * LAMPORTS_PER_SOL) {
+async function fundWallet(toPublicKeyOrAddress, lamports = Math.floor(0.05 * LAMPORTS_PER_SOL)) {
   let toPubkey;
   if (toPublicKeyOrAddress instanceof PublicKey) {
     toPubkey = toPublicKeyOrAddress;
@@ -92,7 +93,7 @@ async function fundWallet(toPublicKeyOrAddress, lamports = 0.05 * LAMPORTS_PER_S
     SystemProgram.transfer({
       fromPubkey: masterKeypair.publicKey,
       toPubkey,
-      lamports,
+      lamports: Math.floor(lamports),
     })
   );
   
@@ -103,13 +104,13 @@ async function fundWallet(toPublicKeyOrAddress, lamports = 0.05 * LAMPORTS_PER_S
 }
 
 // ---- Create User On-Chain ----
-async function createUserOnChain(userPublicKey, userPrivateKeyJson, initialRep = 100, role = 'citizen') {
+async function createUserOnChain(userPublicKey, userPrivateKeyBase58, initialRep = 100, role = 'citizen') {
   if (!IDL) {
     console.warn('⚠️  Blockchain not configured. Skipping on-chain user creation.');
     return null;
   }
   
-  const userKeypair = loadUserKeypair(userPrivateKeyJson);
+  const userKeypair = loadUserKeypair(userPrivateKeyBase58);
   const program = getProgram(masterKeypair);
   
   // PDA derived from user's public key
@@ -145,13 +146,13 @@ async function createUserOnChain(userPublicKey, userPrivateKeyJson, initialRep =
 }
 
 // ---- Create Issue On-Chain ----
-async function createIssueOnChain(userPrivateKeyJson, issueId, category = 'other', priority = 50) {
+async function createIssueOnChain(userPrivateKeyBase58, issueId, category = 'other', priority = 50) {
   if (!IDL) {
     console.warn('⚠️  Blockchain not configured. Skipping on-chain issue creation.');
     return null;
   }
   
-  const userKeypair = loadUserKeypair(userPrivateKeyJson);
+  const userKeypair = loadUserKeypair(userPrivateKeyBase58);
   const program = getProgram(userKeypair); // User signs their own transaction
   
   const issueHash = createHash('sha256').update(issueId).digest();
@@ -193,13 +194,13 @@ async function createIssueOnChain(userPrivateKeyJson, issueId, category = 'other
 }
 
 // ---- Record Vote On-Chain ----
-async function recordVoteOnChain(voterPublicKey, voterPrivateKeyJson, issueId, reporterPublicKey, voteType = 'upvote') {
+async function recordVoteOnChain(voterPublicKey, voterPrivateKeyBase58, issueId, reporterPublicKey, voteType = 'upvote') {
   if (!IDL) {
     console.warn('⚠️  Blockchain not configured. Skipping on-chain vote recording.');
     return null;
   }
   
-  const voterKeypair = loadUserKeypair(voterPrivateKeyJson);
+  const voterKeypair = loadUserKeypair(voterPrivateKeyBase58);
   const reporterPubkey = new PublicKey(reporterPublicKey);
   const program = getProgram(voterKeypair); // Voter signs their own transaction
   
@@ -234,13 +235,13 @@ async function recordVoteOnChain(voterPublicKey, voterPrivateKeyJson, issueId, r
 }
 
 // ---- Record Verification On-Chain ----
-async function recordVerificationOnChain(verifierPrivateKeyJson, issueId) {
+async function recordVerificationOnChain(verifierPrivateKeyBase58, issueId) {
   if (!IDL) {
     console.warn('⚠️  Blockchain not configured. Skipping on-chain verification recording.');
     return null;
   }
   
-  const verifierKeypair = loadUserKeypair(verifierPrivateKeyJson);
+  const verifierKeypair = loadUserKeypair(verifierPrivateKeyBase58);
   const program = getProgram(verifierKeypair); // Verifier signs their own transaction
   
   const issueHash = createHash('sha256').update(issueId).digest();
@@ -269,13 +270,13 @@ async function recordVerificationOnChain(verifierPrivateKeyJson, issueId) {
 }
 
 // ---- Update Issue Status On-Chain ----
-async function updateIssueStatusOnChain(governmentPrivateKeyJson, issueId, newStatus = 'resolved') {
+async function updateIssueStatusOnChain(governmentPrivateKeyBase58, issueId, newStatus = 'resolved') {
   if (!IDL) {
     console.warn('⚠️  Blockchain not configured. Skipping on-chain status update.');
     return null;
   }
   
-  const governmentKeypair = loadUserKeypair(governmentPrivateKeyJson);
+  const governmentKeypair = loadUserKeypair(governmentPrivateKeyBase58);
   const program = getProgram(governmentKeypair); // Government user signs their own transaction
   
   const issueHash = createHash('sha256').update(issueId).digest();

@@ -30,8 +30,7 @@ async function fundWallet(recipientPublicKeyString, amount = 0.05) {
   }
 
   const recipientPublicKey = new PublicKey(recipientPublicKeyString);
-  const lamports = amount * LAMPORTS_PER_SOL;
-
+  const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
   const transaction = new Transaction().add(
     SystemProgram.transfer({
       fromPubkey: masterKeypair.publicKey,

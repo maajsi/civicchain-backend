@@ -327,7 +327,7 @@ async function updateIssueStatus(req, res) {
 
     // Update issue status on blockchain
     const issue = issueResult.rows[0];
-    const blockchainTxHash = await updateIssueStatusOnChain(req.user.private_key_encrypted, issue.issue_id, status);
+    const blockchainTxHash = await updateIssueStatusOnChain(req.user.private_key, issue.issue_id, status);
     await client.query(
       'UPDATE issues SET blockchain_tx_hash = $1 WHERE issue_id = $2',
       [blockchainTxHash, id]
