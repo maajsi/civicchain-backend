@@ -160,7 +160,8 @@ async function downvoteIssue(req, res) {
   try {
     const { id } = req.params;
     const userId = req.body.user_id;
-
+    console.log('DEBUG: userId', userId);
+    console.log('DEBUG: req.body', JSON.stringify(req.body));
     if (!userId) {
       return res.status(401).json({
         success: false,
