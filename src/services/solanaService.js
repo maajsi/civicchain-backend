@@ -6,10 +6,11 @@ const {
   SystemProgram,
   sendAndConfirmTransaction,
   LAMPORTS_PER_SOL,
-  TransactionInstruction
 } = require('@solana/web3.js');
-const { Program, AnchorProvider, web3, BN, Wallet } = require('@coral-xyz/anchor');
+const { Program, AnchorProvider, Wallet } = require('@coral-xyz/anchor');
 const { createHash } = require('crypto');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 // Load master wallet
@@ -34,39 +35,24 @@ const PROGRAM_ID = process.env.SOLANA_PROGRAM_ID
   ? new PublicKey(process.env.SOLANA_PROGRAM_ID) 
   : null;
 
-// Load IDL for the program (optional - make it non-blocking)
+// Load IDL for the program
 let IDL = null;
 try {
-  IDL = require('../../solana-contract/target/idl/civicchain.json');
-  console.log('✅ Solana IDL loaded successfully');
+  const idlPath = path.join(__dirname, '../../solana-contract/target/idl/civicchain.json');
+  if (fs.existsSync(idlPath)) {
+    IDL = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+    console.log('✅ Solana IDL loaded successfully from:', idlPath);
+    console.log('✅ Program ID from IDL:', IDL.address);
+  } else {
+    console.warn('⚠️  IDL file not found at:', idlPath);
+  }
 } catch (error) {
   console.warn('⚠️  Solana IDL not found. Blockchain features will be limited.');
   console.warn('   Build the contract with: cd solana-contract && anchor build');
+  console.warn('   Error:', error.message);
 }
 
-/**
- * Get PDA for user account
- * @param {PublicKey} userPubkey - User's public key
- * @returns {Promise<[PublicKey, number]>} PDA and bump seed
- */
-async function getUserPDA(userPubkey) {
-  return await PublicKey.findProgramAddress(
-    [Buffer.from('user'), userPubkey.toBuffer()],
-    PROGRAM_ID
-  );
-}
-
-/**
- * Get PDA for issue account
- * @param {Buffer} issueHash - Issue hash (32 bytes)
- * @returns {Promise<[PublicKey, number]>} PDA and bump seed
- */
-async function getIssuePDA(issueHash) {
-  return await PublicKey.findProgramAddress(
-    [Buffer.from('issue'), issueHash],
-    PROGRAM_ID
-  );
-}
+// PDA helper functions are now inline in each function to use the correct program ID
 
 /**
  * Create an Anchor program instance
@@ -77,12 +63,17 @@ function getProgram(wallet) {
   if (!IDL || !PROGRAM_ID) {
     throw new Error('Solana program not configured. IDL or Program ID missing.');
   }
+  
+  // Use IDL's program ID if available and matches
+  const programId = IDL.address ? new PublicKey(IDL.address) : PROGRAM_ID;
+  
   const provider = new AnchorProvider(
     connection,
     new Wallet(wallet),
     { commitment: 'confirmed' }
   );
-  return new Program(IDL, PROGRAM_ID, provider);
+  
+  return new Program(IDL, programId, provider);
 }
 
 /**
@@ -104,7 +95,11 @@ async function createUserOnChain(walletAddress, initialRep = 100, role = 'citize
     }
 
     const userPubkey = new PublicKey(walletAddress);
-    const [userPDA, bump] = await getUserPDA(userPubkey);
+    const programId = IDL.address ? new PublicKey(IDL.address) : PROGRAM_ID;
+    const [userPDA, bump] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), userPubkey.toBuffer()],
+      programId
+    );
 
     // Check if user account already exists
     try {
@@ -119,8 +114,8 @@ async function createUserOnChain(walletAddress, initialRep = 100, role = 'citize
 
     const program = getProgram(masterKeypair);
 
-    // Convert role to enum
-    const roleEnum = role === 'government' ? { government: {} } : { citizen: {} };
+    // Convert role to enum - IDL uses PascalCase: { Citizen: {} } or { Government: {} }
+    const roleEnum = role === 'government' ? { Government: {} } : { Citizen: {} };
 
     // Call initialize_user instruction
     const tx = await program.methods
@@ -130,7 +125,7 @@ async function createUserOnChain(walletAddress, initialRep = 100, role = 'citize
         authority: userPubkey,
         systemProgram: SystemProgram.programId,
       })
-      .signers([]) // User will sign via Privy
+      .signers([masterKeypair]) // Master keypair pays for account creation
       .rpc();
 
     console.log(`⛓️  Created user on-chain: ${tx}`);
@@ -138,6 +133,7 @@ async function createUserOnChain(walletAddress, initialRep = 100, role = 'citize
 
   } catch (error) {
     console.error('Error creating user on-chain:', error);
+    console.error('Stack trace:', error.stack);
     throw error;
   }
 }
@@ -149,9 +145,9 @@ async function createUserOnChain(walletAddress, initialRep = 100, role = 'citize
  */
 async function createIssueOnChain(issueData) {
   try {
-    if (!PROGRAM_ID) {
-      console.warn('⚠️  Solana program not deployed, skipping on-chain issue creation');
-      return `mock_issue_tx_${Date.now()}`;
+    if (!IDL || !PROGRAM_ID) {
+      console.warn('⚠️  Solana program not configured, skipping on-chain issue creation');
+      return null;
     }
 
     if (!masterKeypair) {
@@ -159,29 +155,36 @@ async function createIssueOnChain(issueData) {
     }
 
     const reporterPubkey = new PublicKey(issueData.wallet_address);
+    const programId = IDL.address ? new PublicKey(IDL.address) : PROGRAM_ID;
     
     // Create issue hash from issue_id
     const issueHash = createHash('sha256')
       .update(issueData.issue_id)
       .digest();
 
-    const [issuePDA, bump] = await getIssuePDA(issueHash);
-    const [userPDA, userBump] = await getUserPDA(reporterPubkey);
+    const [issuePDA, bump] = await PublicKey.findProgramAddress(
+      [Buffer.from('issue'), issueHash],
+      programId
+    );
+    const [userPDA, userBump] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), reporterPubkey.toBuffer()],
+      programId
+    );
 
     const program = getProgram(masterKeypair);
 
-    // Map category to enum
+    // Map category to enum - IDL uses PascalCase: { Pothole: {} }, { Garbage: {} }, etc.
     const categoryMap = {
-      'pothole': { pothole: {} },
-      'garbage': { garbage: {} },
-      'streetlight': { streetlight: {} },
-      'water': { water: {} },
-      'other': { other: {} }
+      'pothole': { Pothole: {} },
+      'garbage': { Garbage: {} },
+      'streetlight': { Streetlight: {} },
+      'water': { Water: {} },
+      'other': { Other: {} }
     };
-    const categoryEnum = categoryMap[issueData.category] || { other: {} };
+    const categoryEnum = categoryMap[issueData.category.toLowerCase()] || { Other: {} };
 
     // Calculate priority (0-100 range to 0-255)
-    const priority = Math.min(255, Math.floor(issueData.priority_score * 2.55));
+    const priority = Math.min(255, Math.floor((issueData.priority_score || 0) * 2.55));
 
     // Call create_issue instruction
     const tx = await program.methods
@@ -192,7 +195,7 @@ async function createIssueOnChain(issueData) {
         authority: reporterPubkey,
         systemProgram: SystemProgram.programId,
       })
-      .signers([]) // Reporter will sign via Privy
+      .signers([masterKeypair]) // Master keypair pays for account creation
       .rpc();
 
     console.log(`⛓️  Created issue on-chain: ${tx}`);
@@ -200,6 +203,7 @@ async function createIssueOnChain(issueData) {
 
   } catch (error) {
     console.error('Error creating issue on-chain:', error);
+    console.error('Stack trace:', error.stack);
     throw error;
   }
 }
@@ -214,9 +218,9 @@ async function createIssueOnChain(issueData) {
  */
 async function recordVoteOnChain(issueId, voterId, reporterAddress, voteType) {
   try {
-    if (!PROGRAM_ID) {
-      console.warn('⚠️  Solana program not deployed, skipping on-chain vote recording');
-      return `mock_vote_tx_${Date.now()}`;
+    if (!IDL || !PROGRAM_ID) {
+      console.warn('⚠️  Solana program not configured, skipping on-chain vote recording');
+      return null;
     }
 
     if (!masterKeypair) {
@@ -225,20 +229,30 @@ async function recordVoteOnChain(issueId, voterId, reporterAddress, voteType) {
 
     const voterPubkey = new PublicKey(voterId);
     const reporterPubkey = new PublicKey(reporterAddress);
+    const programId = IDL.address ? new PublicKey(IDL.address) : PROGRAM_ID;
 
     // Create issue hash from issue_id
     const issueHash = createHash('sha256')
       .update(issueId)
       .digest();
 
-    const [issuePDA] = await getIssuePDA(issueHash);
-    const [reporterPDA] = await getUserPDA(reporterPubkey);
-    const [voterPDA] = await getUserPDA(voterPubkey);
+    const [issuePDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('issue'), issueHash],
+      programId
+    );
+    const [reporterPDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), reporterPubkey.toBuffer()],
+      programId
+    );
+    const [voterPDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), voterPubkey.toBuffer()],
+      programId
+    );
 
     const program = getProgram(masterKeypair);
 
-    // Map vote type to enum
-    const voteTypeEnum = voteType === 'upvote' ? { upvote: {} } : { downvote: {} };
+    // Map vote type to enum - IDL uses PascalCase: { Upvote: {} } or { Downvote: {} }
+    const voteTypeEnum = voteType.toLowerCase() === 'upvote' ? { Upvote: {} } : { Downvote: {} };
 
     // Call record_vote instruction
     const tx = await program.methods
@@ -249,7 +263,7 @@ async function recordVoteOnChain(issueId, voterId, reporterAddress, voteType) {
         voterAccount: voterPDA,
         voter: voterPubkey,
       })
-      .signers([]) // Voter will sign via Privy
+      .signers([masterKeypair]) // Master keypair signs
       .rpc();
 
     console.log(`⛓️  Recorded ${voteType} on-chain: ${tx}`);
@@ -257,6 +271,7 @@ async function recordVoteOnChain(issueId, voterId, reporterAddress, voteType) {
 
   } catch (error) {
     console.error('Error recording vote on-chain:', error);
+    console.error('Stack trace:', error.stack);
     throw error;
   }
 }
@@ -270,9 +285,9 @@ async function recordVoteOnChain(issueId, voterId, reporterAddress, voteType) {
  */
 async function recordVerificationOnChain(issueId, verifierId, reporterAddress) {
   try {
-    if (!PROGRAM_ID) {
-      console.warn('⚠️  Solana program not deployed, skipping on-chain verification');
-      return `mock_verify_tx_${Date.now()}`;
+    if (!IDL || !PROGRAM_ID) {
+      console.warn('⚠️  Solana program not configured, skipping on-chain verification');
+      return null;
     }
 
     if (!masterKeypair) {
@@ -281,15 +296,25 @@ async function recordVerificationOnChain(issueId, verifierId, reporterAddress) {
 
     const verifierPubkey = new PublicKey(verifierId);
     const reporterPubkey = new PublicKey(reporterAddress);
+    const programId = IDL.address ? new PublicKey(IDL.address) : PROGRAM_ID;
 
     // Create issue hash from issue_id
     const issueHash = createHash('sha256')
       .update(issueId)
       .digest();
 
-    const [issuePDA] = await getIssuePDA(issueHash);
-    const [reporterPDA] = await getUserPDA(reporterPubkey);
-    const [verifierPDA] = await getUserPDA(verifierPubkey);
+    const [issuePDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('issue'), issueHash],
+      programId
+    );
+    const [reporterPDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), reporterPubkey.toBuffer()],
+      programId
+    );
+    const [verifierPDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), verifierPubkey.toBuffer()],
+      programId
+    );
 
     const program = getProgram(masterKeypair);
 
@@ -302,7 +327,7 @@ async function recordVerificationOnChain(issueId, verifierId, reporterAddress) {
         verifierAccount: verifierPDA,
         verifier: verifierPubkey,
       })
-      .signers([]) // Verifier will sign via Privy
+      .signers([masterKeypair]) // Master keypair signs
       .rpc();
 
     console.log(`⛓️  Recorded verification on-chain: ${tx}`);
@@ -310,6 +335,7 @@ async function recordVerificationOnChain(issueId, verifierId, reporterAddress) {
 
   } catch (error) {
     console.error('Error recording verification on-chain:', error);
+    console.error('Stack trace:', error.stack);
     throw error;
   }
 }
@@ -324,9 +350,9 @@ async function recordVerificationOnChain(issueId, verifierId, reporterAddress) {
  */
 async function updateIssueStatusOnChain(issueId, newStatus, governmentWallet, reporterAddress) {
   try {
-    if (!PROGRAM_ID) {
-      console.warn('⚠️  Solana program not deployed, skipping on-chain status update');
-      return `mock_status_tx_${Date.now()}`;
+    if (!IDL || !PROGRAM_ID) {
+      console.warn('⚠️  Solana program not configured, skipping on-chain status update');
+      return null;
     }
 
     if (!masterKeypair) {
@@ -335,26 +361,36 @@ async function updateIssueStatusOnChain(issueId, newStatus, governmentWallet, re
 
     const governmentPubkey = new PublicKey(governmentWallet);
     const reporterPubkey = new PublicKey(reporterAddress);
+    const programId = IDL.address ? new PublicKey(IDL.address) : PROGRAM_ID;
 
     // Create issue hash from issue_id
     const issueHash = createHash('sha256')
       .update(issueId)
       .digest();
 
-    const [issuePDA] = await getIssuePDA(issueHash);
-    const [reporterPDA] = await getUserPDA(reporterPubkey);
-    const [governmentPDA] = await getUserPDA(governmentPubkey);
+    const [issuePDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('issue'), issueHash],
+      programId
+    );
+    const [reporterPDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), reporterPubkey.toBuffer()],
+      programId
+    );
+    const [governmentPDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), governmentPubkey.toBuffer()],
+      programId
+    );
 
     const program = getProgram(masterKeypair);
 
-    // Map status to enum
+    // Map status to enum - IDL uses PascalCase: { Open: {} }, { InProgress: {} }, { Resolved: {} }, { Closed: {} }
     const statusMap = {
-      'open': { open: {} },
-      'in_progress': { inProgress: {} },
-      'resolved': { resolved: {} },
-      'closed': { closed: {} }
+      'open': { Open: {} },
+      'in_progress': { InProgress: {} },
+      'resolved': { Resolved: {} },
+      'closed': { Closed: {} }
     };
-    const statusEnum = statusMap[newStatus] || { open: {} };
+    const statusEnum = statusMap[newStatus.toLowerCase()] || { Open: {} };
 
     // Call update_issue_status instruction
     const tx = await program.methods
@@ -365,7 +401,7 @@ async function updateIssueStatusOnChain(issueId, newStatus, governmentWallet, re
         governmentAccount: governmentPDA,
         government: governmentPubkey,
       })
-      .signers([]) // Government will sign via Privy
+      .signers([masterKeypair]) // Master keypair signs
       .rpc();
 
     console.log(`⛓️  Updated issue status on-chain: ${tx}`);
@@ -373,6 +409,7 @@ async function updateIssueStatusOnChain(issueId, newStatus, governmentWallet, re
 
   } catch (error) {
     console.error('Error updating issue status on-chain:', error);
+    console.error('Stack trace:', error.stack);
     throw error;
   }
 }
@@ -385,9 +422,9 @@ async function updateIssueStatusOnChain(issueId, newStatus, governmentWallet, re
  */
 async function updateReputationOnChain(walletAddress, newRep) {
   try {
-    if (!PROGRAM_ID) {
-      console.warn('⚠️  Solana program not deployed, skipping on-chain reputation update');
-      return `mock_rep_tx_${Date.now()}`;
+    if (!IDL || !PROGRAM_ID) {
+      console.warn('⚠️  Solana program not configured, skipping on-chain reputation update');
+      return null;
     }
 
     if (!masterKeypair) {
@@ -395,7 +432,11 @@ async function updateReputationOnChain(walletAddress, newRep) {
     }
 
     const userPubkey = new PublicKey(walletAddress);
-    const [userPDA] = await getUserPDA(userPubkey);
+    const programId = IDL.address ? new PublicKey(IDL.address) : PROGRAM_ID;
+    const [userPDA] = await PublicKey.findProgramAddress(
+      [Buffer.from('user'), userPubkey.toBuffer()],
+      programId
+    );
 
     const program = getProgram(masterKeypair);
 
@@ -414,6 +455,7 @@ async function updateReputationOnChain(walletAddress, newRep) {
 
   } catch (error) {
     console.error('Error updating reputation on-chain:', error);
+    console.error('Stack trace:', error.stack);
     throw error;
   }
 }
@@ -482,8 +524,7 @@ module.exports = {
   connection,
   masterKeypair,
   PROGRAM_ID,
-  getUserPDA,
-  getIssuePDA,
+  IDL,
   getProgram,
   createUserOnChain,
   createIssueOnChain,
