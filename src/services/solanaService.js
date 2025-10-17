@@ -110,40 +110,60 @@ async function fundWallet(toPublicKeyOrKeypair, lamports = 1 * LAMPORTS_PER_SOL)
 }
 
 // ---- Create User On-Chain ----
-// NOTE: TEMPORARILY DISABLED - Custodial wallet architecture incompatible with smart contract design
-// The smart contract requires authority to be a Signer, but we can't sign with Privy wallets server-side
-// TODO: Either redesign smart contract to support delegated signing, or implement client-side signing
-// For now, user data is maintained only in the database
+// Master wallet pays for account creation and signs transaction
+// User's wallet address (from Privy) is stored in the account but doesn't need to sign
 async function createUserOnChain(walletInfoOrId, initialRep = 100, role = 'citizen') {
-  console.log('⚠️  On-chain user creation temporarily disabled (custodial wallet limitation)');
-  console.log('   User data maintained in database only');
-  console.log('   TODO: Redesign smart contract for custodial wallet support');
+  let walletId, address, publicKey;
   
-  // Return null to indicate no transaction was created
-  // The auth controller will handle this gracefully
-  return null;
+  // Support both formats: direct wallet info object OR wallet ID string
+  if (typeof walletInfoOrId === 'object') {
+    // Direct wallet info passed from createCustodialWallet
+    walletId = walletInfoOrId.walletId;
+    address = walletInfoOrId.walletAddress;
+    publicKey = new PublicKey(address);
+  } else if (typeof walletInfoOrId === 'string' && walletInfoOrId.length > 40) {
+    // Direct wallet address
+    publicKey = new PublicKey(walletInfoOrId);
+    address = walletInfoOrId;
+  } else {
+    // Wallet ID - fetch wallet info
+    const walletInfo = await getUserSolanaWallet(walletInfoOrId);
+    walletId = walletInfo.walletId;
+    address = walletInfo.address;
+    publicKey = walletInfo.publicKey;
+  }
   
-  /*
-  ISSUE: The smart contract's InitializeUser context requires:
-  - authority: Signer<'info> (line 194 in lib.rs)
-  - seeds = [b"user", authority.key().as_ref()] (line 188 in lib.rs)
+  const program = getProgram(masterKeypair);
   
-  This means:
-  1. The authority MUST sign the transaction
-  2. The PDA is derived from the authority's public key
+  // PDA is derived from the user's public key
+  const [userPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from('user'), publicKey.toBuffer()],
+    PROGRAM_ID
+  );
   
-  In a custodial wallet system:
-  - Master wallet signs all transactions
-  - Privy wallets provide user identity but can't sign server-side
+  // Anchor v0.29 enum format: Rust PascalCase -> JS camelCase
+  const roleEnum = role === 'government' ? { government: {} } : { citizen: {} };
   
-  SOLUTIONS:
-  A. Modify smart contract to separate payer from authority
-  B. Implement client-side signing with Privy (requires frontend changes)
-  C. Use master wallet as authority with user_id in seeds (loses individual user PDAs)
-  D. Skip on-chain user accounts and only use blockchain for issues/votes
-  
-  Current implementation uses Solution D (temporary)
-  */
+  try {
+    console.log(`⛓️  Creating user account on-chain: ${address}`);
+    
+    // Master wallet pays and signs, user's pubkey is stored in the account
+    const tx = await program.methods
+      .initializeUser(publicKey, initialRep, roleEnum)
+      .accounts({
+        userAccount: userPDA,
+        payer: masterKeypair.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([masterKeypair])
+      .rpc();
+    
+    console.log(`✅ User account created on-chain for ${address}. Tx: ${tx}`);
+    return tx;
+  } catch (error) {
+    console.error('❌ Error creating user on-chain:', error);
+    throw new Error(`Failed to create user on-chain: ${error.message}`);
+  }
 }
 
 // ---- Create Issue On-Chain ----
