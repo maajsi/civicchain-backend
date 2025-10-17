@@ -104,30 +104,27 @@ async function fundWallet(toPublicKeyOrAddress, lamports = Math.floor(0.05 * LAM
 }
 
 // ---- Create User On-Chain ----
-async function createUserOnChain(userPublicKey, userPrivateKeyBase58, initialRep = 100, role = 'citizen') {
+async function createUserOnChain(userPublicKey, initialRep, roleEnum, userPrivateKeyBase58) {
   if (!IDL) {
     console.warn('⚠️  Blockchain not configured. Skipping on-chain user creation.');
     return null;
   }
-  
+
   const userKeypair = loadUserKeypair(userPrivateKeyBase58);
   const program = getProgram(masterKeypair);
-  
+
   // PDA derived from user's public key
   const [userPDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from('user'), userKeypair.publicKey.toBuffer()],
+    [Buffer.from('user'), new PublicKey(userPublicKey).toBuffer()],
     PROGRAM_ID
   );
-  
-  // Anchor enum format: camelCase
-  const roleEnum = role === 'government' ? { government: {} } : { citizen: {} };
-  
+
   try {
     console.log(`⛓️  Creating user account on-chain: ${userPublicKey}`);
-    
+
     // Master wallet pays for account creation, passes user's pubkey as parameter
     const tx = await program.methods
-      .initializeUser(userKeypair.publicKey, initialRep, roleEnum)
+      .initializeUser(new PublicKey(userPublicKey), initialRep, roleEnum)
       .accounts({
         userAccount: userPDA,
         payer: masterKeypair.publicKey,
@@ -135,7 +132,7 @@ async function createUserOnChain(userPublicKey, userPrivateKeyBase58, initialRep
       })
       .signers([masterKeypair])
       .rpc();
-    
+
     console.log(`✅ User account created on-chain. Tx: ${tx}`);
     return tx;
   } catch (error) {
