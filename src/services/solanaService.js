@@ -46,7 +46,8 @@ async function fundWalletFromMaster(toKeypair, lamports = 1 * LAMPORTS_PER_SOL) 
 // Create User on-chain
 async function createUserOnChain(userKeypair, initialRep = 100, role = 'citizen') {
   const program = getProgram(userKeypair);
-  const [userPDA] = await PublicKey.findProgramAddressSync(
+  // findProgramAddressSync is a static method on PublicKey, not an instance method
+  const [userPDA] = PublicKey.findProgramAddressSync(
     [Buffer.from('user'), userKeypair.publicKey.toBuffer()],
     PROGRAM_ID
   );
