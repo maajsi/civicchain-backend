@@ -52,7 +52,14 @@ async function reportIssue(req, res) {
   
   try {
     const { image_url, description, category, lat, lng, region } = req.body;
-    const userId = req.user.user_id;
+    const userId = (req.user && req.user.user_id) ? req.user.user_id : req.body.user_id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: missing user context'
+      });
+    }
 
     // Validate required fields
     if (!image_url || !description || !category || lat === undefined || lng === undefined) {
@@ -77,8 +84,7 @@ async function reportIssue(req, res) {
     const userQuery = 'SELECT * FROM users WHERE user_id = $1';
     const userResult = await client.query(userQuery, [userId]);
     const user = userResult.rows[0];
-    console.log('userID', userId);
-    console.log('user', user);
+    console.log('DEBUG: userID', userId);
     if (!user) {
       await client.query('ROLLBACK');
       return res.status(404).json({
