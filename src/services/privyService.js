@@ -50,13 +50,30 @@ async function createCustodialWallet(userId, email) {
     });
 
     console.log(`✅ Created Privy user for ${email}: ${privyUser.id}`);
+    console.log('DEBUG: Privy user response:', JSON.stringify(privyUser, null, 2));
 
     // Find the Solana embedded wallet in linked accounts
-    const solanaWallet = privyUser.linked_accounts.find(
+    const solanaWallet = privyUser.linked_accounts?.find(
       account => account.type === 'solana_embedded_wallet'
     );
 
     if (!solanaWallet) {
+      // Wallet might be in a separate field or need to be fetched
+      console.warn('⚠️  Wallet not in linked_accounts, fetching user again...');
+      const refreshedUser = await client.users().get(privyUser.id);
+      const refreshedWallet = refreshedUser.linked_accounts?.find(
+        account => account.type === 'solana_embedded_wallet'
+      );
+      
+      if (refreshedWallet) {
+        console.log(`✅ Found Solana wallet after refresh: ${refreshedWallet.address}`);
+        return {
+          walletAddress: refreshedWallet.address,
+          privyUserId: privyUser.id,
+          walletId: refreshedWallet.wallet_id
+        };
+      }
+      
       throw new Error('No Solana wallet created for user');
     }
 
