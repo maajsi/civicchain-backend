@@ -110,57 +110,40 @@ async function fundWallet(toPublicKeyOrKeypair, lamports = 1 * LAMPORTS_PER_SOL)
 }
 
 // ---- Create User On-Chain ----
-// NOTE: Server-side approach - Master wallet signs all transactions
-// Privy custodial wallets are used for identity (the authority), but master wallet pays gas
+// NOTE: TEMPORARILY DISABLED - Custodial wallet architecture incompatible with smart contract design
+// The smart contract requires authority to be a Signer, but we can't sign with Privy wallets server-side
+// TODO: Either redesign smart contract to support delegated signing, or implement client-side signing
+// For now, user data is maintained only in the database
 async function createUserOnChain(walletInfoOrId, initialRep = 100, role = 'citizen') {
-  let address, publicKey;
+  console.log('⚠️  On-chain user creation temporarily disabled (custodial wallet limitation)');
+  console.log('   User data maintained in database only');
+  console.log('   TODO: Redesign smart contract for custodial wallet support');
   
-  // Support both formats: direct wallet info object OR wallet ID string
-  if (typeof walletInfoOrId === 'object') {
-    // Direct wallet info passed from createCustodialWallet
-    address = walletInfoOrId.walletAddress;
-    publicKey = new PublicKey(address);
-  } else {
-    // Wallet ID - fetch wallet info
-    const walletInfo = await getUserSolanaWallet(walletInfoOrId);
-    address = walletInfo.address;
-    publicKey = walletInfo.publicKey;
-  }
+  // Return null to indicate no transaction was created
+  // The auth controller will handle this gracefully
+  return null;
   
-  // Build the transaction - master wallet signs and pays
-  const program = getProgram(masterKeypair);
-  const [userPDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from('user'), publicKey.toBuffer()],
-    PROGRAM_ID
-  );
+  /*
+  ISSUE: The smart contract's InitializeUser context requires:
+  - authority: Signer<'info> (line 194 in lib.rs)
+  - seeds = [b"user", authority.key().as_ref()] (line 188 in lib.rs)
   
-  // Anchor expects PascalCase enum variants
-  const roleEnum = role === 'government' ? { Government: {} } : { Citizen: {} };
+  This means:
+  1. The authority MUST sign the transaction
+  2. The PDA is derived from the authority's public key
   
-  try {
-    console.log(`⛓️  Creating user account on-chain for ${address}`);
-    console.log(`   User PDA: ${userPDA.toString()}`);
-    console.log(`   Authority (Privy wallet): ${publicKey.toString()}`);
-    console.log(`   Role: ${role}`);
-    
-    // Master wallet signs and pays for the transaction
-    const tx = await program.methods
-      .initializeUser(initialRep, roleEnum)
-      .accounts({
-        userAccount: userPDA,
-        authority: publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([masterKeypair])
-      .rpc();
-    
-    console.log(`✅ User account created on-chain. Tx: ${tx}`);
-    return tx;
-  } catch (error) {
-    console.error('❌ Error creating user on-chain:', error);
-    console.error('Error stack:', error.stack);
-    throw new Error(`Failed to create user on-chain: ${error.message}`);
-  }
+  In a custodial wallet system:
+  - Master wallet signs all transactions
+  - Privy wallets provide user identity but can't sign server-side
+  
+  SOLUTIONS:
+  A. Modify smart contract to separate payer from authority
+  B. Implement client-side signing with Privy (requires frontend changes)
+  C. Use master wallet as authority with user_id in seeds (loses individual user PDAs)
+  D. Skip on-chain user accounts and only use blockchain for issues/votes
+  
+  Current implementation uses Solution D (temporary)
+  */
 }
 
 // ---- Create Issue On-Chain ----
@@ -182,15 +165,16 @@ async function createIssueOnChain(walletIdOrAddress, issueId, category = 'other'
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
   const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
 
-  // PascalCase enums
+  // Anchor v0.29 enum format: Rust PascalCase -> JS camelCase
+  // Pothole -> pothole, Garbage -> garbage, etc.
   const categoryMap = {
-    pothole: { Pothole: {} },
-    garbage: { Garbage: {} },
-    streetlight: { Streetlight: {} },
-    water: { Water: {} },
-    other: { Other: {} }
+    pothole: { pothole: {} },
+    garbage: { garbage: {} },
+    streetlight: { streetlight: {} },
+    water: { water: {} },
+    other: { other: {} }
   };
-  const categoryEnum = categoryMap[category.toLowerCase()] || { Other: {} };
+  const categoryEnum = categoryMap[category.toLowerCase()] || { other: {} };
   
   try {
     console.log(`⛓️  Creating issue on-chain: ${issueId}`);
@@ -225,8 +209,8 @@ async function recordVoteOnChain(voterWalletAddress, issueId, reporterWalletAddr
   const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), reporterPubkey.toBuffer()], PROGRAM_ID);
   const [voterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), voterPubkey.toBuffer()], PROGRAM_ID);
   
-  // PascalCase enums
-  const voteTypeEnum = voteType.toLowerCase() === 'upvote' ? { Upvote: {} } : { Downvote: {} };
+  // Anchor v0.29 enum format: Rust Upvote/Downvote -> JS upvote/downvote
+  const voteTypeEnum = voteType.toLowerCase() === 'upvote' ? { upvote: {} } : { downvote: {} };
   
   try {
     console.log(`⛓️  Recording ${voteType} on-chain for issue: ${issueId}`);
@@ -294,14 +278,17 @@ async function updateIssueStatusOnChain(governmentWalletAddress, issueId, report
   const [governmentPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), governmentPubkey.toBuffer()], PROGRAM_ID);
   const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), reporterPubkey.toBuffer()], PROGRAM_ID);
 
-  // PascalCase enums
+  // Anchor v0.29 enum format: Rust IssueStatus variants -> JS camelCase
+  // Open -> open, InProgress -> inProgress, Resolved -> resolved, Closed -> closed
   const statusMap = {
-    open: { Open: {} },
-    inprogress: { InProgress: {} },
-    resolved: { Resolved: {} },
-    closed: { Closed: {} }
+    open: { open: {} },
+    'in-progress': { inProgress: {} },
+    'in_progress': { inProgress: {} },
+    inprogress: { inProgress: {} },
+    resolved: { resolved: {} },
+    closed: { closed: {} }
   };
-  const statusEnum = statusMap[newStatus.toLowerCase().replace(/[_\s]/g, '')] || { Open: {} };
+  const statusEnum = statusMap[newStatus.toLowerCase().replace(/[\s]/g, '-')] || { open: {} };
   
   try {
     console.log(`⛓️  Updating issue status on-chain: ${issueId} -> ${newStatus}`);
