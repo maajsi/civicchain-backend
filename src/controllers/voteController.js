@@ -13,7 +13,14 @@ async function upvoteIssue(req, res) {
   
   try {
     const { id } = req.params;
-    const userId = req.user.user_id;
+    const userId = (req.user && req.user.user_id) ? req.user.user_id : req.body.user_id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: missing user context'
+      });
+    }
 
     await client.query('BEGIN');
 
@@ -30,6 +37,13 @@ async function upvoteIssue(req, res) {
     }
 
     const issue = issueResult.rows[0];
+
+    const voterResult = await client.query('SELECT * FROM users WHERE user_id = $1', [userId]);
+    const voter = voterResult.rows[0];
+    if (!voter) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
 
     // Check if user already voted
     const existingVoteQuery = 'SELECT * FROM votes WHERE user_id = $1 AND issue_id = $2';
@@ -83,8 +97,8 @@ async function upvoteIssue(req, res) {
 
     // Record vote on blockchain
     const blockchainTxHash = await recordVoteOnChain(
-      req.user.wallet_address,
-      req.user.private_key,
+      voter.wallet_address,
+      voter.private_key,
       issue.issue_id,
       reporter.wallet_address,
       'upvote'
@@ -145,7 +159,14 @@ async function downvoteIssue(req, res) {
   
   try {
     const { id } = req.params;
-    const userId = req.user.user_id;
+    const userId = (req.user && req.user.user_id) ? req.user.user_id : req.body.user_id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized: missing user context'
+      });
+    }
 
     await client.query('BEGIN');
 
@@ -162,6 +183,13 @@ async function downvoteIssue(req, res) {
     }
 
     const issue = issueResult.rows[0];
+
+    const voterResult = await client.query('SELECT * FROM users WHERE user_id = $1', [userId]);
+    const voter = voterResult.rows[0];
+    if (!voter) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
 
     // Check if user already voted
     const existingVoteQuery = 'SELECT * FROM votes WHERE user_id = $1 AND issue_id = $2';
@@ -215,8 +243,8 @@ async function downvoteIssue(req, res) {
 
     // Record vote on blockchain (downvote)
     const blockchainTxHash = await recordVoteOnChain(
-      req.user.wallet_address,
-      req.user.private_key,
+      voter.wallet_address,
+      voter.private_key,
       issue.issue_id,
       reporter.wallet_address,
       'downvote'
