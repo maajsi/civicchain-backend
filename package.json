@@ -22,7 +22,7 @@
   "license": "ISC",
   "dependencies": {
     "@coral-xyz/anchor": "^0.29.0",
-    "@privy-io/server-auth": "^1.9.0",
+  "@privy-io/node": "^0.3.0",
     "@sentry/node": "^8.0.0",
     "@sentry/profiling-node": "^8.0.0",
     "@solana/web3.js": "^1.98.4",
