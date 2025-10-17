@@ -34,29 +34,38 @@ async function createCustodialWallet(userId, email) {
   const client = await getPrivyClient();
 
   try {
-    // Create or import user with email linked account
+    // Create user with email and Solana embedded wallet in one call
     const privyUser = await client.users().create({
       linked_accounts: [
         {
           type: 'email',
           address: email
         }
+      ],
+      wallets: [
+        {
+          chain_type: 'solana'
+        }
       ]
     });
 
     console.log(`✅ Created Privy user for ${email}: ${privyUser.id}`);
 
-    // Create a Solana embedded wallet for the user
-    const wallet = await client.wallets().create({
-      chain_type: 'solana'
-    });
+    // Find the Solana embedded wallet in linked accounts
+    const solanaWallet = privyUser.linked_accounts.find(
+      account => account.type === 'solana_embedded_wallet'
+    );
 
-    console.log(`✅ Created Solana wallet for ${email}: ${wallet.address}`);
+    if (!solanaWallet) {
+      throw new Error('No Solana wallet created for user');
+    }
+
+    console.log(`✅ Created Solana wallet for ${email}: ${solanaWallet.address}`);
 
     return {
-      walletAddress: wallet.address,
+      walletAddress: solanaWallet.address,
       privyUserId: privyUser.id,
-      walletId: wallet.id
+      walletId: solanaWallet.wallet_id
     };
   } catch (error) {
     console.error('❌ Error creating Privy custodial wallet:', error);
