@@ -1,61 +1,62 @@
-const { PrivyClient } = require('@privy-io/server-auth');
 require('dotenv').config();
 
-// Initialize Privy client with proper error handling
+// Initialize Privy client with proper error handling using dynamic import (ESM compatibility)
 let privyClient = null;
-if (process.env.PRIVY_APP_ID && process.env.PRIVY_APP_SECRET) {
-  try {
-    privyClient = new PrivyClient(
-      process.env.PRIVY_APP_ID,
-      process.env.PRIVY_APP_SECRET
-    );
-    console.log('✅ Privy client initialized');
-  } catch (error) {
-    console.error('❌ Failed to initialize Privy client:', error.message);
+
+async function getPrivyClient() {
+  if (!privyClient) {
+    if (!process.env.PRIVY_APP_ID || !process.env.PRIVY_APP_SECRET) {
+      throw new Error('Privy credentials not configured. Check PRIVY_APP_ID and PRIVY_APP_SECRET.');
+    }
+    
+    try {
+      const module = await import('@privy-io/node');
+      privyClient = new module.PrivyClient({
+        appId: process.env.PRIVY_APP_ID,
+        appSecret: process.env.PRIVY_APP_SECRET,
+      });
+      console.log('✅ Privy client initialized');
+    } catch (error) {
+      console.error('❌ Failed to initialize Privy client:', error.message);
+      throw error;
+    }
   }
-} else {
-  console.warn('⚠️  Privy credentials not configured. Custodial wallet features disabled.');
+  return privyClient;
 }
 
 /**
  * Create a custodial wallet for a user using Privy
  * @param {string} userId - User ID from database
  * @param {string} email - User's email
- * @returns {Promise<{walletAddress: string, privyUserId: string}>}
+ * @returns {Promise<{walletAddress: string, privyUserId: string, walletId: string}>}
  */
 async function createCustodialWallet(userId, email) {
-  if (!privyClient) {
-    throw new Error('Privy client not initialized. Check PRIVY_APP_ID and PRIVY_APP_SECRET.');
-  }
+  const client = await getPrivyClient();
 
   try {
-    // Import user or create if doesn't exist
-    // Privy will automatically create an embedded wallet
-    const privyUser = await privyClient.importUser({
-      linkedAccounts: [
+    // Create or import user with email linked account
+    const privyUser = await client.users().create({
+      linked_accounts: [
         {
           type: 'email',
           address: email
         }
-      ],
-      createEthereumWallet: false, 
-      createSolanaWallet: true 
+      ]
     });
 
-    // Get the Solana wallet from linked accounts
-    const wallet = privyUser.linkedAccounts?.find(
-      account => account.type === 'wallet' && account.chainType === 'solana'
-    );
+    console.log(`✅ Created Privy user for ${email}: ${privyUser.id}`);
 
-    if (!wallet) {
-      throw new Error('No Solana wallet created by Privy');
-    }
+    // Create a Solana embedded wallet for the user
+    const wallet = await client.wallets().create({
+      chain_type: 'solana'
+    });
 
-    console.log(`✅ Created Privy custodial wallet for ${email}:`, wallet.address);
+    console.log(`✅ Created Solana wallet for ${email}: ${wallet.address}`);
 
     return {
       walletAddress: wallet.address,
-      privyUserId: privyUser.id
+      privyUserId: privyUser.id,
+      walletId: wallet.id
     };
   } catch (error) {
     console.error('❌ Error creating Privy custodial wallet:', error);
@@ -66,25 +67,27 @@ async function createCustodialWallet(userId, email) {
 /**
  * Get a user's wallet from Privy
  * @param {string} privyUserId - Privy user ID
- * @returns {Promise<string>} Wallet address
+ * @returns {Promise<{address: string, walletId: string}>} Wallet info
  */
 async function getPrivyWallet(privyUserId) {
-  if (!privyClient) {
-    throw new Error('Privy client not initialized');
-  }
+  const client = await getPrivyClient();
 
   try {
-    const privyUser = await privyClient.getUser(privyUserId);
+    const privyUser = await client.users().get(privyUserId);
     
-    const wallet = privyUser.linkedAccounts?.find(
-      account => account.type === 'wallet' && account.chainType === 'solana'
+    // Find Solana embedded wallet in linked accounts
+    const wallet = privyUser.linked_accounts?.find(
+      account => account.type === 'solana_embedded_wallet'
     );
 
     if (!wallet) {
       throw new Error('No Solana wallet found for Privy user');
     }
 
-    return wallet.address;
+    return {
+      address: wallet.address,
+      walletId: wallet.wallet_id
+    };
   } catch (error) {
     console.error('❌ Error getting Privy wallet:', error);
     throw new Error(`Failed to get Privy wallet: ${error.message}`);
@@ -97,12 +100,10 @@ async function getPrivyWallet(privyUserId) {
  * @returns {Promise<Object>} Verified user claims
  */
 async function verifyPrivyToken(accessToken) {
-  if (!privyClient) {
-    throw new Error('Privy client not initialized');
-  }
+  const client = await getPrivyClient();
 
   try {
-    const claims = await privyClient.verifyAuthToken(accessToken);
+    const claims = await client.auth().verifyAccessToken(accessToken);
     return claims;
   } catch (error) {
     console.error('❌ Error verifying Privy token:', error);
@@ -110,9 +111,30 @@ async function verifyPrivyToken(accessToken) {
   }
 }
 
+/**
+ * Get user by email address
+ * @param {string} email - User's email
+ * @returns {Promise<Object|null>} Privy user object or null
+ */
+async function getUserByEmail(email) {
+  const client = await getPrivyClient();
+
+  try {
+    const user = await client.users().getByEmail(email);
+    return user;
+  } catch (error) {
+    if (error.status === 404) {
+      return null; // User not found
+    }
+    console.error('❌ Error getting user by email:', error);
+    throw new Error(`Failed to get user: ${error.message}`);
+  }
+}
+
 module.exports = {
-  privyClient,
+  getPrivyClient,
   createCustodialWallet,
   getPrivyWallet,
-  verifyPrivyToken
+  verifyPrivyToken,
+  getUserByEmail
 };
