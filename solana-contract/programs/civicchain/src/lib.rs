@@ -7,13 +7,16 @@ pub mod civicchain {
     use super::*;
 
     /// Initialize a new user account
+    /// user_pubkey: The public key of the user's wallet (from Privy)
+    /// payer: The master wallet that pays for account creation
     pub fn initialize_user(
         ctx: Context<InitializeUser>,
+        user_pubkey: Pubkey,
         initial_rep: u32,
         role: UserRole,
     ) -> Result<()> {
         let user_account = &mut ctx.accounts.user_account;
-        user_account.wallet_address = ctx.accounts.authority.key();
+        user_account.wallet_address = user_pubkey;
         user_account.reputation = initial_rep;
         user_account.role = role;
         user_account.total_issues = 0;
@@ -21,7 +24,7 @@ pub mod civicchain {
         user_account.created_at = Clock::get()?.unix_timestamp;
         user_account.bump = ctx.bumps.user_account;
         
-        msg!("User initialized: {}", ctx.accounts.authority.key());
+        msg!("User initialized: {}", user_pubkey);
         Ok(())
     }
 
@@ -180,18 +183,19 @@ pub struct IssueAccount {
 // ============================================================================
 
 #[derive(Accounts)]
+#[instruction(user_pubkey: Pubkey)]
 pub struct InitializeUser<'info> {
     #[account(
         init,
-        payer = authority,
+        payer = payer,
         space = 8 + 32 + 4 + 1 + 4 + 4 + 8 + 1,
-        seeds = [b"user", authority.key().as_ref()],
+        seeds = [b"user", user_pubkey.as_ref()],
         bump
     )]
     pub user_account: Account<'info, UserAccount>,
     
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub payer: Signer<'info>,
     
     pub system_program: Program<'info, System>,
 }
