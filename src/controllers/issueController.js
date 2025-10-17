@@ -77,6 +77,15 @@ async function reportIssue(req, res) {
     const userQuery = 'SELECT * FROM users WHERE user_id = $1';
     const userResult = await client.query(userQuery, [userId]);
     const user = userResult.rows[0];
+    console.log('userID', userId);
+    console.log('user', user);
+    if (!user) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
 
     // Calculate initial priority score
     const priorityScore = await calculatePriorityScore({
