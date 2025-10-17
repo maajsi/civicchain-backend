@@ -134,7 +134,8 @@ async function createUserOnChain(walletInfoOrId, initialRep = 100, role = 'citiz
     [Buffer.from('user'), publicKey.toBuffer()],
     PROGRAM_ID
   );
-  const roleEnum = role === 'government' ? { Government: {} } : { Citizen: {} };
+  // Anchor expects enum variants with lowercase keys
+  const roleEnum = role === 'government' ? { government: {} } : { citizen: {} };
   
   // Build instruction
   const ix = await program.methods
@@ -180,13 +181,13 @@ async function createIssueOnChain(walletId, issueId, category = 'other', priorit
   const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
 
   const categoryMap = {
-    pothole: { Pothole: {} },
-    garbage: { Garbage: {} },
-    streetlight: { Streetlight: {} },
-    water: { Water: {} },
-    other: { Other: {} }
+    pothole: { pothole: {} },
+    garbage: { garbage: {} },
+    streetlight: { streetlight: {} },
+    water: { water: {} },
+    other: { other: {} }
   };
-  const categoryEnum = categoryMap[category.toLowerCase()] || { Other: {} };
+  const categoryEnum = categoryMap[category.toLowerCase()] || { other: {} };
   
   const ix = await program.methods
     .createIssue(Array.from(issueHash), categoryEnum, priority)
@@ -230,7 +231,7 @@ async function recordVoteOnChain(walletId, issueId, reporterPubkey, voteType = '
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
   const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), new PublicKey(reporterPubkey).toBuffer()], PROGRAM_ID);
   const [voterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
-  const voteTypeEnum = voteType.toLowerCase() === 'upvote' ? { Upvote: {} } : { Downvote: {} };
+  const voteTypeEnum = voteType.toLowerCase() === 'upvote' ? { upvote: {} } : { downvote: {} };
   
   const ix = await program.methods
     .recordVote(voteTypeEnum)
@@ -316,12 +317,12 @@ async function updateIssueStatusOnChain(walletId, issueId, newStatus = 'resolved
   const [governmentPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
 
   const statusMap = {
-    open: { Open: {} },
-    inprogress: { InProgress: {} },
-    resolved: { Resolved: {} },
-    closed: { Closed: {} }
+    open: { open: {} },
+    inprogress: { inProgress: {} },
+    resolved: { resolved: {} },
+    closed: { closed: {} }
   };
-  const statusEnum = statusMap[newStatus.toLowerCase().replace(/[_\s]/g, '')] || { Open: {} };
+  const statusEnum = statusMap[newStatus.toLowerCase().replace(/[_\s]/g, '')] || { open: {} };
   
   const ix = await program.methods
     .updateIssueStatus(statusEnum)
