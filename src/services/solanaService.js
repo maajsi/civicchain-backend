@@ -147,28 +147,36 @@ async function createUserOnChain(walletInfoOrId, initialRep = 100, role = 'citiz
     })
     .instruction();
   
-  // Create VersionedTransaction as per Privy docs
+  // Create transaction
   const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
-  const message = new TransactionMessage({
-    payerKey: publicKey,
-    instructions: [ix],
-    recentBlockhash,
-  });
-  const transaction = new VersionedTransaction(message.compileToV0Message());
+  const tx = new Transaction().add(ix);
+  tx.feePayer = publicKey;
+  tx.recentBlockhash = recentBlockhash;
   
-  // Sign transaction with Privy
+  // Serialize transaction for Privy signing
+  const serializedTx = tx.serializeMessage().toString('base64');
+  
+  // Sign transaction with Privy using signAndSendTransaction API
   const privy = await getPrivyClient();
-  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
-    transaction: Buffer.from(transaction.serialize()).toString('base64'),
-  });
   
-  // Send the signed transaction
-  const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTransaction, 'base64'),
-    { skipPreflight: false }
-  );
-  await connection.confirmTransaction(signature, 'confirmed');
-  return signature;
+  try {
+    console.log(`🔐 Signing transaction with Privy wallet: ${walletId}`);
+    
+    // Use signAndSendTransaction instead of signTransaction
+    const result = await privy.wallets().solana().signAndSendTransaction(walletId, {
+      unsignedTransaction: serializedTx,
+      description: 'Initialize user account on CivicChain',
+    });
+    
+    console.log(`✅ User account created on-chain for ${address}. Tx: ${result.transactionHash}`);
+    return result.transactionHash;
+  } catch (error) {
+    console.error('❌ Privy signing error:', error);
+    console.error('Error details:', JSON.stringify(error, null, 2));
+    console.error('Wallet ID:', walletId);
+    console.error('Public Key:', publicKey.toString());
+    throw new Error(`Failed to sign transaction with Privy: ${error.message}`);
+  }
 }
 
 // ---- Create Issue On-Chain ----
