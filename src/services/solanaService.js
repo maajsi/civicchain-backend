@@ -110,21 +110,47 @@ async function createUserOnChain(userPublicKey, initialRep, roleEnum, userPrivat
     return null;
   }
 
+  // Defensive debug log
+  console.log('[createUserOnChain] ARGS:', {
+    type_userPublicKey: typeof userPublicKey,
+    userPublicKey: userPublicKey && userPublicKey.toString ? userPublicKey.toString() : userPublicKey,
+    initialRep: initialRep,
+    type_initialRep: typeof initialRep,
+    roleEnum: roleEnum,
+    type_roleEnum: typeof roleEnum,
+    userPrivateKeyBase58_type: typeof userPrivateKeyBase58,
+    userPrivateKeyBase58_val: userPrivateKeyBase58 && userPrivateKeyBase58.substring ? userPrivateKeyBase58.substring(0, 10) + '...' : userPrivateKeyBase58
+  });
+
   const userKeypair = loadUserKeypair(userPrivateKeyBase58);
   const program = getProgram(masterKeypair);
 
+  const userPubStr = userPublicKey && userPublicKey.toString ? userPublicKey.toString() : userPublicKey;
+  const pkey = new PublicKey(userPubStr);
+
   // PDA derived from user's public key
   const [userPDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from('user'), new PublicKey(userPublicKey).toBuffer()],
+    [Buffer.from('user'), pkey.toBuffer()],
     PROGRAM_ID
   );
 
-  try {
-    console.log(`⛓️  Creating user account on-chain: ${userPublicKey}`);
+  // Defensive enum enforcement
+  let validRoles = ['citizen', 'government'];
+  let normalizedRoleEnum = roleEnum;
+  if (typeof roleEnum === 'string' && validRoles.includes(roleEnum.toLowerCase())) {
+    normalizedRoleEnum = {};
+    normalizedRoleEnum[roleEnum.toLowerCase()] = {};
+  }
+  if (typeof roleEnum === 'object' && Object.keys(roleEnum).length === 1) {
+    // ok, already like {citizen:{}}, {government:{}}, do nothing
+  } else {
+    throw new Error('Invalid roleEnum! Value: ' + JSON.stringify(roleEnum));
+  }
 
-    // Master wallet pays for account creation, passes user's pubkey as parameter
+  try {
+    console.log(`[createUserOnChain] Submitting tx with args`, {userPubStr, initialRep, normalizedRoleEnum});
     const tx = await program.methods
-      .initializeUser(new PublicKey(userPublicKey), initialRep, roleEnum)
+      .initializeUser(userPubStr, initialRep, normalizedRoleEnum)
       .accounts({
         userAccount: userPDA,
         payer: masterKeypair.publicKey,
@@ -132,7 +158,6 @@ async function createUserOnChain(userPublicKey, initialRep, roleEnum, userPrivat
       })
       .signers([masterKeypair])
       .rpc();
-
     console.log(`✅ User account created on-chain. Tx: ${tx}`);
     return tx;
   } catch (error) {
