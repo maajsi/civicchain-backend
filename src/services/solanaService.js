@@ -88,7 +88,7 @@ function getProgram(wallet) {
     { commitment: 'confirmed' }
   );
   
-  return new Program(IDL, programId, provider);
+  return new Program(IDL, provider);
 }
 
 /**
