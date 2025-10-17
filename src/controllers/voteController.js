@@ -83,14 +83,15 @@ async function upvoteIssue(req, res) {
 
     // Record vote on blockchain
     const blockchainTxHash = await recordVoteOnChain(
-      req.user.privy_wallet_id,
+      req.user.wallet_address,
+      req.user.private_key_encrypted,
       issue.issue_id,
       reporter.wallet_address,
       'upvote'
     );
 
     // Update reputation on blockchain
-    await updateReputationOnChain(reporter.privy_wallet_id, reporter.wallet_address, newRep);
+    await updateReputationOnChain(reporter.wallet_address, newRep);
 
     await client.query('COMMIT');
 
@@ -212,16 +213,17 @@ async function downvoteIssue(req, res) {
     const newBadges = updateBadges(updatedReporter.rows[0]);
     await client.query('UPDATE users SET badges = $1 WHERE user_id = $2', [newBadges, issue.reporter_user_id]);
 
-    // Record vote on blockchain
+    // Record vote on blockchain (downvote)
     const blockchainTxHash = await recordVoteOnChain(
-      req.user.privy_wallet_id,
+      req.user.wallet_address,
+      req.user.private_key_encrypted,
       issue.issue_id,
       reporter.wallet_address,
       'downvote'
     );
 
     // Update reputation on blockchain
-    await updateReputationOnChain(reporter.privy_wallet_id, reporter.wallet_address, newRep);
+    await updateReputationOnChain(reporter.wallet_address, newRep);
 
     await client.query('COMMIT');
 

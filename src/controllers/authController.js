@@ -10,7 +10,6 @@ require('dotenv').config();
  * POST /auth/login
  * Handle NextAuth JWT verification, create or retrieve user
  * Expects JWT in request body, validates it, creates/returns user
- * Uses Privy for custodial wallet management
  */
 async function login(req, res) {
   const client = await pool.connect();

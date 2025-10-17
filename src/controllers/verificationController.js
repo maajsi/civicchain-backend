@@ -142,13 +142,13 @@ async function verifyIssue(req, res) {
 
     // Record verification on blockchain
     const blockchainTxHash = await recordVerificationOnChain(
-      req.user.privy_wallet_id,
+      req.user.private_key_encrypted,
       issue.issue_id
     );
 
     // Update reputations on blockchain
-    await updateReputationOnChain(verifier.privy_wallet_id, verifier.wallet_address, verifierNewRep);
-    await updateReputationOnChain(reporter.privy_wallet_id, reporter.wallet_address, reporterNewRep);
+    await updateReputationOnChain(verifier.wallet_address, verifierNewRep);
+    await updateReputationOnChain(reporter.wallet_address, reporterNewRep);
 
     await client.query('COMMIT');
 
