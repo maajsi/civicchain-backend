@@ -48,7 +48,7 @@ const masterKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(MASTER_WA
 const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
 const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID);
 
-const idlPath = path.join(__dirname, '../../solana-contract/target/idl/civicchain.json');
+const idlPath = path.join(__dirname, '../../solana-contract/target/idl/idl.json');
 if (!fs.existsSync(idlPath)) throw new Error('IDL file not found at: ' + idlPath);
 const IDL = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
 
