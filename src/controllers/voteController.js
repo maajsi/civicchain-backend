@@ -13,7 +13,7 @@ async function upvoteIssue(req, res) {
   
   try {
     const { id } = req.params;
-    const userId = (req.user && req.user.user_id) ? req.user.user_id : req.body.user_id;
+    const userId = req.body.user_id;
 
     if (!userId) {
       return res.status(401).json({
@@ -159,7 +159,7 @@ async function downvoteIssue(req, res) {
   
   try {
     const { id } = req.params;
-    const userId = (req.user && req.user.user_id) ? req.user.user_id : req.body.user_id;
+    const userId = req.body.user_id;
 
     if (!userId) {
       return res.status(401).json({
