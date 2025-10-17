@@ -1,8 +1,9 @@
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
-const { fundWallet, createUserOnChain } = require('../services/solanaService');
+const { fundWallet, createUserOnChain, connection } = require('../services/solanaService');
 const { createCustodialWallet, getPrivyWallet } = require('../services/privyService');
+const { LAMPORTS_PER_SOL } = require('@solana/web3.js');
 require('dotenv').config();
 
 /**
@@ -148,14 +149,16 @@ async function login(req, res) {
 
       if (isNew) {
         try {
-          const txSignature = await fundWallet(walletAddress, 0.05);
+          // Fund wallet with 0.05 SOL (convert to lamports)
+          const txSignature = await fundWallet(walletAddress, 0.05 * LAMPORTS_PER_SOL);
           console.log(`💰 Funded new wallet ${walletAddress} with 0.05 SOL. Tx: ${txSignature}`);
         } catch (fundError) {
           console.warn('⚠️  Failed to fund wallet:', fundError.message);
         }
 
         try {
-          const blockchainTx = await createUserOnChain(walletAddress, 100, 'citizen');
+          // Create user on-chain using Privy user ID (not wallet address)
+          const blockchainTx = await createUserOnChain(privyUserId, 100, 'citizen');
           if (blockchainTx) {
             console.log(`🔗 User created on-chain. Tx: ${blockchainTx}`);
           }
