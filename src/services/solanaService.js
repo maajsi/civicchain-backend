@@ -43,6 +43,21 @@ try {
     IDL = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
     console.log('✅ Solana IDL loaded successfully from:', idlPath);
     console.log('✅ Program ID from IDL:', IDL.address);
+    
+    // FIX: Merge types into accounts for @coral-xyz/anchor compatibility
+    if (IDL.accounts && IDL.types) {
+      IDL.accounts = IDL.accounts.map(account => {
+        const typeDefinition = IDL.types.find(t => t.name === account.name);
+        if (typeDefinition && !account.type) {
+          return {
+            ...account,
+            type: typeDefinition.type
+          };
+        }
+        return account;
+      });
+      console.log('✅ IDL accounts enriched with type definitions');
+    }
   } else {
     console.warn('⚠️  IDL file not found at:', idlPath);
   }
