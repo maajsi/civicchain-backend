@@ -1,18 +1,23 @@
 /**
  * CivicChain Solana Service
  * 
- * IMPORTANT: Privy Embedded Wallet Architecture
- * -----------------------------------------------
- * Privy embedded wallets do NOT expose private keys directly for security reasons.
- * All transactions must be signed through Privy's API using the wallet ID.
+ * SERVER-SIDE BLOCKCHAIN APPROACH
+ * --------------------------------
+ * This service uses a server-side approach where:
+ * 1. Privy custodial wallets are created for user identity (wallet addresses)
+ * 2. Master wallet signs and pays for ALL blockchain transactions
+ * 3. User wallet addresses are used as authorities in smart contract calls
  * 
- * This means we:
- * 1. Build transactions manually with Anchor instructions
- * 2. Serialize the transaction
- * 3. Send it to Privy's API to sign with the user's embedded wallet
- * 4. Broadcast the signed transaction to Solana
+ * Benefits:
+ * - No gas fees for users
+ * - Simplified user experience (no wallet management)
+ * - Privy handles wallet creation and recovery
+ * - All transactions paid by platform (master wallet)
  * 
- * Reference: https://docs.privy.io/api-reference/wallets/solana/sign-transaction
+ * Trade-offs:
+ * - Platform pays for all gas fees
+ * - Users don't directly sign transactions (delegated to master wallet)
+ * - Still maintains on-chain user identity via PDA accounts
  */
 const {
   Connection,
@@ -21,8 +26,6 @@ const {
   Transaction,
   SystemProgram,
   LAMPORTS_PER_SOL,
-  VersionedTransaction,
-  TransactionMessage,
 } = require('@solana/web3.js');
 const { Program, AnchorProvider, Wallet } = require('@coral-xyz/anchor');
 const { createHash } = require('crypto');
@@ -107,299 +110,246 @@ async function fundWallet(toPublicKeyOrKeypair, lamports = 1 * LAMPORTS_PER_SOL)
 }
 
 // ---- Create User On-Chain ----
-// NOTE: Privy embedded wallets cannot be used directly with Anchor
-// because Privy does NOT expose private keys. You have two options:
-// 1. Use server-side wallets (master wallet) to create accounts
-// 2. Build transactions manually and use Privy's signTransaction API
+// NOTE: Server-side approach - Master wallet signs all transactions
+// Privy custodial wallets are used for identity (the authority), but master wallet pays gas
 async function createUserOnChain(walletInfoOrId, initialRep = 100, role = 'citizen') {
-  let walletId, address, publicKey;
+  let address, publicKey;
   
   // Support both formats: direct wallet info object OR wallet ID string
   if (typeof walletInfoOrId === 'object') {
     // Direct wallet info passed from createCustodialWallet
-    walletId = walletInfoOrId.walletId;
     address = walletInfoOrId.walletAddress;
     publicKey = new PublicKey(address);
   } else {
     // Wallet ID - fetch wallet info
     const walletInfo = await getUserSolanaWallet(walletInfoOrId);
-    walletId = walletInfo.walletId;
     address = walletInfo.address;
     publicKey = walletInfo.publicKey;
   }
   
-  // Build the transaction instruction manually
-  const program = getProgram(masterKeypair); // Use master wallet for provider
+  // Build the transaction - master wallet signs and pays
+  const program = getProgram(masterKeypair);
   const [userPDA] = PublicKey.findProgramAddressSync(
     [Buffer.from('user'), publicKey.toBuffer()],
     PROGRAM_ID
   );
-  // Anchor expects enum variants with lowercase keys
-  const roleEnum = role === 'government' ? { government: {} } : { citizen: {} };
   
-  // Build instruction
-  const ix = await program.methods
-    .initializeUser(initialRep, roleEnum)
-    .accounts({
-      userAccount: userPDA,
-      authority: publicKey,
-      systemProgram: SystemProgram.programId,
-    })
-    .instruction();
-  
-  // Create transaction
-  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
-  const tx = new Transaction().add(ix);
-  tx.feePayer = publicKey;
-  tx.recentBlockhash = recentBlockhash;
-  
-  // Serialize transaction for Privy signing
-  const serializedTx = tx.serializeMessage().toString('base64');
-  
-  // Sign transaction with Privy using signAndSendTransaction API
-  const privy = await getPrivyClient();
+  // Anchor expects PascalCase enum variants
+  const roleEnum = role === 'government' ? { Government: {} } : { Citizen: {} };
   
   try {
-    console.log(`🔐 Signing transaction with Privy wallet: ${walletId}`);
+    console.log(`⛓️  Creating user account on-chain for ${address}`);
+    console.log(`   User PDA: ${userPDA.toString()}`);
+    console.log(`   Authority (Privy wallet): ${publicKey.toString()}`);
+    console.log(`   Role: ${role}`);
     
-    // Use signAndSendTransaction instead of signTransaction
-    const result = await privy.wallets().solana().signAndSendTransaction(walletId, {
-      unsignedTransaction: serializedTx,
-      description: 'Initialize user account on CivicChain',
-    });
+    // Master wallet signs and pays for the transaction
+    const tx = await program.methods
+      .initializeUser(initialRep, roleEnum)
+      .accounts({
+        userAccount: userPDA,
+        authority: publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([masterKeypair])
+      .rpc();
     
-    console.log(`✅ User account created on-chain for ${address}. Tx: ${result.transactionHash}`);
-    return result.transactionHash;
+    console.log(`✅ User account created on-chain. Tx: ${tx}`);
+    return tx;
   } catch (error) {
-    console.error('❌ Privy signing error:', error);
-    console.error('Error details:', JSON.stringify(error, null, 2));
-    console.error('Wallet ID:', walletId);
-    console.error('Public Key:', publicKey.toString());
-    throw new Error(`Failed to sign transaction with Privy: ${error.message}`);
+    console.error('❌ Error creating user on-chain:', error);
+    console.error('Error stack:', error.stack);
+    throw new Error(`Failed to create user on-chain: ${error.message}`);
   }
 }
 
 // ---- Create Issue On-Chain ----
-async function createIssueOnChain(walletId, issueId, category = 'other', priority = 50) {
-  const { publicKey, address } = await getUserSolanaWallet(walletId);
+async function createIssueOnChain(walletIdOrAddress, issueId, category = 'other', priority = 50) {
+  let publicKey;
+  
+  // Support wallet ID or direct address
+  if (typeof walletIdOrAddress === 'string' && walletIdOrAddress.length > 50) {
+    // It's a wallet address
+    publicKey = new PublicKey(walletIdOrAddress);
+  } else {
+    // It's a wallet ID - fetch wallet info
+    const walletInfo = await getUserSolanaWallet(walletIdOrAddress);
+    publicKey = walletInfo.publicKey;
+  }
   
   const program = getProgram(masterKeypair);
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
   const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
 
+  // PascalCase enums
   const categoryMap = {
-    pothole: { pothole: {} },
-    garbage: { garbage: {} },
-    streetlight: { streetlight: {} },
-    water: { water: {} },
-    other: { other: {} }
+    pothole: { Pothole: {} },
+    garbage: { Garbage: {} },
+    streetlight: { Streetlight: {} },
+    water: { Water: {} },
+    other: { Other: {} }
   };
-  const categoryEnum = categoryMap[category.toLowerCase()] || { other: {} };
+  const categoryEnum = categoryMap[category.toLowerCase()] || { Other: {} };
   
-  const ix = await program.methods
-    .createIssue(Array.from(issueHash), categoryEnum, priority)
-    .accounts({
-      issueAccount: issuePDA,
-      userAccount: userPDA,
-      authority: publicKey,
-      systemProgram: SystemProgram.programId,
-    })
-    .instruction();
-  
-  // Create VersionedTransaction
-  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
-  const message = new TransactionMessage({
-    payerKey: publicKey,
-    instructions: [ix],
-    recentBlockhash,
-  });
-  const transaction = new VersionedTransaction(message.compileToV0Message());
-  
-  // Sign transaction with Privy
-  const privy = await getPrivyClient();
-  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
-    transaction: Buffer.from(transaction.serialize()).toString('base64'),
-  });
-  
-  const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTransaction, 'base64'),
-    { skipPreflight: false }
-  );
-  await connection.confirmTransaction(signature, 'confirmed');
-  return signature;
+  try {
+    console.log(`⛓️  Creating issue on-chain: ${issueId}`);
+    
+    const tx = await program.methods
+      .createIssue(Array.from(issueHash), categoryEnum, priority)
+      .accounts({
+        issueAccount: issuePDA,
+        userAccount: userPDA,
+        authority: publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([masterKeypair])
+      .rpc();
+    
+    console.log(`✅ Issue created on-chain. Tx: ${tx}`);
+    return tx;
+  } catch (error) {
+    console.error('❌ Error creating issue on-chain:', error);
+    throw new Error(`Failed to create issue on-chain: ${error.message}`);
+  }
 }
 
 // ---- Record Vote On-Chain ----
-async function recordVoteOnChain(walletId, issueId, reporterPubkey, voteType = 'upvote') {
-  const { publicKey } = await getUserSolanaWallet(walletId);
+async function recordVoteOnChain(voterWalletAddress, issueId, reporterWalletAddress, voteType = 'upvote') {
+  const voterPubkey = new PublicKey(voterWalletAddress);
+  const reporterPubkey = new PublicKey(reporterWalletAddress);
   
   const program = getProgram(masterKeypair);
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
-  const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), new PublicKey(reporterPubkey).toBuffer()], PROGRAM_ID);
-  const [voterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
-  const voteTypeEnum = voteType.toLowerCase() === 'upvote' ? { upvote: {} } : { downvote: {} };
+  const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), reporterPubkey.toBuffer()], PROGRAM_ID);
+  const [voterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), voterPubkey.toBuffer()], PROGRAM_ID);
   
-  const ix = await program.methods
-    .recordVote(voteTypeEnum)
-    .accounts({
-      issueAccount: issuePDA,
-      reporterAccount: reporterPDA,
-      voterAccount: voterPDA,
-      voter: publicKey,
-    })
-    .instruction();
+  // PascalCase enums
+  const voteTypeEnum = voteType.toLowerCase() === 'upvote' ? { Upvote: {} } : { Downvote: {} };
   
-  // Create VersionedTransaction
-  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
-  const message = new TransactionMessage({
-    payerKey: publicKey,
-    instructions: [ix],
-    recentBlockhash,
-  });
-  const transaction = new VersionedTransaction(message.compileToV0Message());
-  
-  // Sign transaction with Privy
-  const privy = await getPrivyClient();
-  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
-    transaction: Buffer.from(transaction.serialize()).toString('base64'),
-  });
-  
-  const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTransaction, 'base64'),
-    { skipPreflight: false }
-  );
-  await connection.confirmTransaction(signature, 'confirmed');
-  return signature;
+  try {
+    console.log(`⛓️  Recording ${voteType} on-chain for issue: ${issueId}`);
+    
+    const tx = await program.methods
+      .recordVote(voteTypeEnum)
+      .accounts({
+        issueAccount: issuePDA,
+        reporterAccount: reporterPDA,
+        voterAccount: voterPDA,
+        voter: voterPubkey,
+      })
+      .signers([masterKeypair])
+      .rpc();
+    
+    console.log(`✅ Vote recorded on-chain. Tx: ${tx}`);
+    return tx;
+  } catch (error) {
+    console.error('❌ Error recording vote on-chain:', error);
+    throw new Error(`Failed to record vote on-chain: ${error.message}`);
+  }
 }
 
 // ---- Record Verification On-Chain ----
-async function recordVerificationOnChain(walletId, issueId) {
-  const { publicKey } = await getUserSolanaWallet(walletId);
+async function recordVerificationOnChain(verifierWalletAddress, issueId, reporterWalletAddress) {
+  const verifierPubkey = new PublicKey(verifierWalletAddress);
+  const reporterPubkey = new PublicKey(reporterWalletAddress);
   
   const program = getProgram(masterKeypair);
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
-  const [verifierPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
+  const [verifierPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), verifierPubkey.toBuffer()], PROGRAM_ID);
+  const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), reporterPubkey.toBuffer()], PROGRAM_ID);
   
-  const ix = await program.methods
-    .recordVerification()
-    .accounts({
-      issueAccount: issuePDA,
-      verifierAccount: verifierPDA,
-      verifier: publicKey,
-    })
-    .instruction();
-  
-  // Create VersionedTransaction
-  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
-  const message = new TransactionMessage({
-    payerKey: publicKey,
-    instructions: [ix],
-    recentBlockhash,
-  });
-  const transaction = new VersionedTransaction(message.compileToV0Message());
-  
-  // Sign transaction with Privy
-  const privy = await getPrivyClient();
-  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
-    transaction: Buffer.from(transaction.serialize()).toString('base64'),
-  });
-  
-  const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTransaction, 'base64'),
-    { skipPreflight: false }
-  );
-  await connection.confirmTransaction(signature, 'confirmed');
-  return signature;
+  try {
+    console.log(`⛓️  Recording verification on-chain for issue: ${issueId}`);
+    
+    const tx = await program.methods
+      .recordVerification()
+      .accounts({
+        issueAccount: issuePDA,
+        reporterAccount: reporterPDA,
+        verifierAccount: verifierPDA,
+        verifier: verifierPubkey,
+      })
+      .signers([masterKeypair])
+      .rpc();
+    
+    console.log(`✅ Verification recorded on-chain. Tx: ${tx}`);
+    return tx;
+  } catch (error) {
+    console.error('❌ Error recording verification on-chain:', error);
+    throw new Error(`Failed to record verification on-chain: ${error.message}`);
+  }
 }
 
 // ---- Update Issue Status On-Chain ----
-async function updateIssueStatusOnChain(walletId, issueId, newStatus = 'resolved') {
-  const { publicKey } = await getUserSolanaWallet(walletId);
+async function updateIssueStatusOnChain(governmentWalletAddress, issueId, reporterWalletAddress, newStatus = 'resolved') {
+  const governmentPubkey = new PublicKey(governmentWalletAddress);
+  const reporterPubkey = new PublicKey(reporterWalletAddress);
   
   const program = getProgram(masterKeypair);
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
-  const [governmentPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
+  const [governmentPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), governmentPubkey.toBuffer()], PROGRAM_ID);
+  const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), reporterPubkey.toBuffer()], PROGRAM_ID);
 
+  // PascalCase enums
   const statusMap = {
-    open: { open: {} },
-    inprogress: { inProgress: {} },
-    resolved: { resolved: {} },
-    closed: { closed: {} }
+    open: { Open: {} },
+    inprogress: { InProgress: {} },
+    resolved: { Resolved: {} },
+    closed: { Closed: {} }
   };
-  const statusEnum = statusMap[newStatus.toLowerCase().replace(/[_\s]/g, '')] || { open: {} };
+  const statusEnum = statusMap[newStatus.toLowerCase().replace(/[_\s]/g, '')] || { Open: {} };
   
-  const ix = await program.methods
-    .updateIssueStatus(statusEnum)
-    .accounts({
-      issueAccount: issuePDA,
-      governmentAccount: governmentPDA,
-      government: publicKey,
-    })
-    .instruction();
-  
-  // Create VersionedTransaction
-  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
-  const message = new TransactionMessage({
-    payerKey: publicKey,
-    instructions: [ix],
-    recentBlockhash,
-  });
-  const transaction = new VersionedTransaction(message.compileToV0Message());
-  
-  // Sign transaction with Privy
-  const privy = await getPrivyClient();
-  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
-    transaction: Buffer.from(transaction.serialize()).toString('base64'),
-  });
-  
-  const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTransaction, 'base64'),
-    { skipPreflight: false }
-  );
-  await connection.confirmTransaction(signature, 'confirmed');
-  return signature;
+  try {
+    console.log(`⛓️  Updating issue status on-chain: ${issueId} -> ${newStatus}`);
+    
+    const tx = await program.methods
+      .updateIssueStatus(statusEnum)
+      .accounts({
+        issueAccount: issuePDA,
+        reporterAccount: reporterPDA,
+        governmentAccount: governmentPDA,
+        government: governmentPubkey,
+      })
+      .signers([masterKeypair])
+      .rpc();
+    
+    console.log(`✅ Issue status updated on-chain. Tx: ${tx}`);
+    return tx;
+  } catch (error) {
+    console.error('❌ Error updating issue status on-chain:', error);
+    throw new Error(`Failed to update issue status on-chain: ${error.message}`);
+  }
 }
 
 // ---- Update Reputation On-Chain ----
-async function updateReputationOnChain(walletId, userPubkey, newRep) {
-  const { publicKey } = await getUserSolanaWallet(walletId);
+async function updateReputationOnChain(userWalletAddress, newRep) {
+  const userPubkey = new PublicKey(userWalletAddress);
   
   const program = getProgram(masterKeypair);
-  const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), new PublicKey(userPubkey).toBuffer()], PROGRAM_ID);
+  const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), userPubkey.toBuffer()], PROGRAM_ID);
   
-  const ix = await program.methods
-    .updateReputation(newRep)
-    .accounts({
-      userAccount: userPDA,
-      authority: publicKey,
-    })
-    .instruction();
-  
-  // Create VersionedTransaction
-  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
-  const message = new TransactionMessage({
-    payerKey: publicKey,
-    instructions: [ix],
-    recentBlockhash,
-  });
-  const transaction = new VersionedTransaction(message.compileToV0Message());
-  
-  // Sign transaction with Privy
-  const privy = await getPrivyClient();
-  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
-    transaction: Buffer.from(transaction.serialize()).toString('base64'),
-  });
-  
-  const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTransaction, 'base64'),
-    { skipPreflight: false }
-  );
-  await connection.confirmTransaction(signature, 'confirmed');
-  return signature;
+  try {
+    console.log(`⛓️  Updating reputation on-chain for ${userWalletAddress}: ${newRep}`);
+    
+    const tx = await program.methods
+      .updateReputation(newRep)
+      .accounts({
+        userAccount: userPDA,
+        authority: masterKeypair.publicKey,
+      })
+      .signers([masterKeypair])
+      .rpc();
+    
+    console.log(`✅ Reputation updated on-chain. Tx: ${tx}`);
+    return tx;
+  } catch (error) {
+    console.error('❌ Error updating reputation on-chain:', error);
+    throw new Error(`Failed to update reputation on-chain: ${error.message}`);
+  }
 }
 
 module.exports = {
