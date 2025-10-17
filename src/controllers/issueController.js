@@ -125,12 +125,12 @@ async function reportIssue(req, res) {
     await client.query('UPDATE users SET badges = $1 WHERE user_id = $2', [newBadges, userId]);
 
     // Create blockchain transaction
-    const blockchainTxHash = await createIssueOnChain({
-      issue_id: issueId,
-      reporter_wallet: user.wallet_address,
+    const blockchainTxHash = await createIssueOnChain(
+      user.privy_wallet_id,
+      issueId,
       category,
-      priority_score: priorityScore
-    });
+      priorityScore
+    );
     await client.query(
       'UPDATE issues SET blockchain_tx_hash = $1 WHERE issue_id = $2',
       [blockchainTxHash, issueId]

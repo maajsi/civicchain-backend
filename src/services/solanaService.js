@@ -21,6 +21,8 @@ const {
   Transaction,
   SystemProgram,
   LAMPORTS_PER_SOL,
+  VersionedTransaction,
+  TransactionMessage,
 } = require('@solana/web3.js');
 const { Program, AnchorProvider, Wallet } = require('@coral-xyz/anchor');
 const { createHash } = require('crypto');
@@ -59,30 +61,24 @@ function getProgram(wallet) {
 }
 
 // ---- Privy SDK: Get User's Solana Wallet ----
-async function getUserSolanaWallet(privyUserId) {
-  // Get the user to access their linked accounts
+// Use privy.wallets().get() instead of privy.users().get() as per docs
+async function getUserSolanaWallet(walletId) {
   const privy = await getPrivyClient();
-  const user = await privy.users().get(privyUserId);
-  if (!user) throw new Error('Privy: User not found: ' + privyUserId);
-
-  // Find the Solana wallet in linked accounts
-  // Note: Privy returns type "wallet" for embedded wallets, not "solana_embedded_wallet"
-  const solanaWallet = user.linked_accounts.find(
-    account => (account.type === 'wallet' || account.type === 'solana_embedded_wallet')
-              && account.chain_type === 'solana'
-  );
+  const wallet = await privy.wallets().get(walletId);
   
-  if (!solanaWallet) {
-    throw new Error('Privy: No Solana wallet found for user ' + privyUserId);
+  if (!wallet) {
+    throw new Error('Privy: Wallet not found: ' + walletId);
+  }
+  
+  if (wallet.chain_type !== 'solana') {
+    throw new Error('Privy: Wallet is not a Solana wallet');
   }
 
-  // Return wallet ID and address
-  // Note: Privy does NOT expose private keys directly
-  // You must use Privy's signing/transaction methods
+  // Return wallet info
   return {
-    walletId: solanaWallet.id || solanaWallet.wallet_id,
-    address: solanaWallet.address,
-    publicKey: new PublicKey(solanaWallet.address),
+    walletId: wallet.id,
+    address: wallet.address,
+    publicKey: new PublicKey(wallet.address),
   };
 }
 
@@ -115,8 +111,22 @@ async function fundWallet(toPublicKeyOrKeypair, lamports = 1 * LAMPORTS_PER_SOL)
 // because Privy does NOT expose private keys. You have two options:
 // 1. Use server-side wallets (master wallet) to create accounts
 // 2. Build transactions manually and use Privy's signTransaction API
-async function createUserOnChain(privyUserId, initialRep = 100, role = 'citizen') {
-  const { walletId, address, publicKey } = await getUserSolanaWallet(privyUserId);
+async function createUserOnChain(walletInfoOrId, initialRep = 100, role = 'citizen') {
+  let walletId, address, publicKey;
+  
+  // Support both formats: direct wallet info object OR wallet ID string
+  if (typeof walletInfoOrId === 'object') {
+    // Direct wallet info passed from createCustodialWallet
+    walletId = walletInfoOrId.walletId;
+    address = walletInfoOrId.walletAddress;
+    publicKey = new PublicKey(address);
+  } else {
+    // Wallet ID - fetch wallet info
+    const walletInfo = await getUserSolanaWallet(walletInfoOrId);
+    walletId = walletInfo.walletId;
+    address = walletInfo.address;
+    publicKey = walletInfo.publicKey;
+  }
   
   // Build the transaction instruction manually
   const program = getProgram(masterKeypair); // Use master wallet for provider
@@ -136,25 +146,24 @@ async function createUserOnChain(privyUserId, initialRep = 100, role = 'citizen'
     })
     .instruction();
   
-  // Create transaction
-  const tx = new Transaction().add(ix);
-  tx.feePayer = publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  // Create VersionedTransaction as per Privy docs
+  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
+  const message = new TransactionMessage({
+    payerKey: publicKey,
+    instructions: [ix],
+    recentBlockhash,
+  });
+  const transaction = new VersionedTransaction(message.compileToV0Message());
   
-  // Serialize and sign with Privy
-  const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
-  
+  // Sign transaction with Privy
   const privy = await getPrivyClient();
-  const signedTx = await privy.wallets().solana().signTransaction(walletId, {
-    caip2: 'solana:devnet', // or 'solana:mainnet'
-    params: {
-      transaction: serializedTx,
-    },
+  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
+    transaction: Buffer.from(transaction.serialize()).toString('base64'),
   });
   
   // Send the signed transaction
   const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTx.transaction, 'base64'),
+    Buffer.from(signedTransaction, 'base64'),
     { skipPreflight: false }
   );
   await connection.confirmTransaction(signature, 'confirmed');
@@ -162,8 +171,8 @@ async function createUserOnChain(privyUserId, initialRep = 100, role = 'citizen'
 }
 
 // ---- Create Issue On-Chain ----
-async function createIssueOnChain(reporterPrivyUserId, issueId, category = 'other', priority = 50) {
-  const { walletId, publicKey } = await getUserSolanaWallet(reporterPrivyUserId);
+async function createIssueOnChain(walletId, issueId, category = 'other', priority = 50) {
+  const { publicKey, address } = await getUserSolanaWallet(walletId);
   
   const program = getProgram(masterKeypair);
   const issueHash = createHash('sha256').update(issueId).digest();
@@ -189,19 +198,23 @@ async function createIssueOnChain(reporterPrivyUserId, issueId, category = 'othe
     })
     .instruction();
   
-  const tx = new Transaction().add(ix);
-  tx.feePayer = publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  // Create VersionedTransaction
+  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
+  const message = new TransactionMessage({
+    payerKey: publicKey,
+    instructions: [ix],
+    recentBlockhash,
+  });
+  const transaction = new VersionedTransaction(message.compileToV0Message());
   
-  const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  // Sign transaction with Privy
   const privy = await getPrivyClient();
-  const signedTx = await privy.wallets().solana().signTransaction(walletId, {
-    caip2: 'solana:devnet',
-    params: { transaction: serializedTx },
+  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
+    transaction: Buffer.from(transaction.serialize()).toString('base64'),
   });
   
   const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTx.transaction, 'base64'),
+    Buffer.from(signedTransaction, 'base64'),
     { skipPreflight: false }
   );
   await connection.confirmTransaction(signature, 'confirmed');
@@ -209,8 +222,8 @@ async function createIssueOnChain(reporterPrivyUserId, issueId, category = 'othe
 }
 
 // ---- Record Vote On-Chain ----
-async function recordVoteOnChain(voterPrivyUserId, issueId, reporterPubkey, voteType = 'upvote') {
-  const { walletId, publicKey } = await getUserSolanaWallet(voterPrivyUserId);
+async function recordVoteOnChain(walletId, issueId, reporterPubkey, voteType = 'upvote') {
+  const { publicKey } = await getUserSolanaWallet(walletId);
   
   const program = getProgram(masterKeypair);
   const issueHash = createHash('sha256').update(issueId).digest();
@@ -229,19 +242,23 @@ async function recordVoteOnChain(voterPrivyUserId, issueId, reporterPubkey, vote
     })
     .instruction();
   
-  const tx = new Transaction().add(ix);
-  tx.feePayer = publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  // Create VersionedTransaction
+  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
+  const message = new TransactionMessage({
+    payerKey: publicKey,
+    instructions: [ix],
+    recentBlockhash,
+  });
+  const transaction = new VersionedTransaction(message.compileToV0Message());
   
-  const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  // Sign transaction with Privy
   const privy = await getPrivyClient();
-  const signedTx = await privy.wallets().solana().signTransaction(walletId, {
-    caip2: 'solana:devnet',
-    params: { transaction: serializedTx },
+  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
+    transaction: Buffer.from(transaction.serialize()).toString('base64'),
   });
   
   const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTx.transaction, 'base64'),
+    Buffer.from(signedTransaction, 'base64'),
     { skipPreflight: false }
   );
   await connection.confirmTransaction(signature, 'confirmed');
@@ -249,8 +266,8 @@ async function recordVoteOnChain(voterPrivyUserId, issueId, reporterPubkey, vote
 }
 
 // ---- Record Verification On-Chain ----
-async function recordVerificationOnChain(verifierPrivyUserId, issueId) {
-  const { walletId, publicKey } = await getUserSolanaWallet(verifierPrivyUserId);
+async function recordVerificationOnChain(walletId, issueId) {
+  const { publicKey } = await getUserSolanaWallet(walletId);
   
   const program = getProgram(masterKeypair);
   const issueHash = createHash('sha256').update(issueId).digest();
@@ -266,19 +283,23 @@ async function recordVerificationOnChain(verifierPrivyUserId, issueId) {
     })
     .instruction();
   
-  const tx = new Transaction().add(ix);
-  tx.feePayer = publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  // Create VersionedTransaction
+  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
+  const message = new TransactionMessage({
+    payerKey: publicKey,
+    instructions: [ix],
+    recentBlockhash,
+  });
+  const transaction = new VersionedTransaction(message.compileToV0Message());
   
-  const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  // Sign transaction with Privy
   const privy = await getPrivyClient();
-  const signedTx = await privy.wallets().solana().signTransaction(walletId, {
-    caip2: 'solana:devnet',
-    params: { transaction: serializedTx },
+  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
+    transaction: Buffer.from(transaction.serialize()).toString('base64'),
   });
   
   const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTx.transaction, 'base64'),
+    Buffer.from(signedTransaction, 'base64'),
     { skipPreflight: false }
   );
   await connection.confirmTransaction(signature, 'confirmed');
@@ -286,8 +307,8 @@ async function recordVerificationOnChain(verifierPrivyUserId, issueId) {
 }
 
 // ---- Update Issue Status On-Chain ----
-async function updateIssueStatusOnChain(governmentPrivyUserId, issueId, newStatus = 'resolved') {
-  const { walletId, publicKey } = await getUserSolanaWallet(governmentPrivyUserId);
+async function updateIssueStatusOnChain(walletId, issueId, newStatus = 'resolved') {
+  const { publicKey } = await getUserSolanaWallet(walletId);
   
   const program = getProgram(masterKeypair);
   const issueHash = createHash('sha256').update(issueId).digest();
@@ -311,19 +332,23 @@ async function updateIssueStatusOnChain(governmentPrivyUserId, issueId, newStatu
     })
     .instruction();
   
-  const tx = new Transaction().add(ix);
-  tx.feePayer = publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  // Create VersionedTransaction
+  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
+  const message = new TransactionMessage({
+    payerKey: publicKey,
+    instructions: [ix],
+    recentBlockhash,
+  });
+  const transaction = new VersionedTransaction(message.compileToV0Message());
   
-  const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  // Sign transaction with Privy
   const privy = await getPrivyClient();
-  const signedTx = await privy.wallets().solana().signTransaction(walletId, {
-    caip2: 'solana:devnet',
-    params: { transaction: serializedTx },
+  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
+    transaction: Buffer.from(transaction.serialize()).toString('base64'),
   });
   
   const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTx.transaction, 'base64'),
+    Buffer.from(signedTransaction, 'base64'),
     { skipPreflight: false }
   );
   await connection.confirmTransaction(signature, 'confirmed');
@@ -331,8 +356,8 @@ async function updateIssueStatusOnChain(governmentPrivyUserId, issueId, newStatu
 }
 
 // ---- Update Reputation On-Chain ----
-async function updateReputationOnChain(authorityPrivyUserId, userPubkey, newRep) {
-  const { walletId, publicKey } = await getUserSolanaWallet(authorityPrivyUserId);
+async function updateReputationOnChain(walletId, userPubkey, newRep) {
+  const { publicKey } = await getUserSolanaWallet(walletId);
   
   const program = getProgram(masterKeypair);
   const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), new PublicKey(userPubkey).toBuffer()], PROGRAM_ID);
@@ -345,19 +370,23 @@ async function updateReputationOnChain(authorityPrivyUserId, userPubkey, newRep)
     })
     .instruction();
   
-  const tx = new Transaction().add(ix);
-  tx.feePayer = publicKey;
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  // Create VersionedTransaction
+  const { blockhash: recentBlockhash } = await connection.getLatestBlockhash();
+  const message = new TransactionMessage({
+    payerKey: publicKey,
+    instructions: [ix],
+    recentBlockhash,
+  });
+  const transaction = new VersionedTransaction(message.compileToV0Message());
   
-  const serializedTx = tx.serialize({ requireAllSignatures: false }).toString('base64');
+  // Sign transaction with Privy
   const privy = await getPrivyClient();
-  const signedTx = await privy.wallets().solana().signTransaction(walletId, {
-    caip2: 'solana:devnet',
-    params: { transaction: serializedTx },
+  const { signedTransaction } = await privy.wallets().solana().signTransaction(walletId, {
+    transaction: Buffer.from(transaction.serialize()).toString('base64'),
   });
   
   const signature = await connection.sendRawTransaction(
-    Buffer.from(signedTx.transaction, 'base64'),
+    Buffer.from(signedTransaction, 'base64'),
     { skipPreflight: false }
   );
   await connection.confirmTransaction(signature, 'confirmed');

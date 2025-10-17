@@ -80,9 +80,10 @@ async function login(req, res) {
       const userId = uuidv4();
       let walletAddress;
       let privyUserId;
+      let privyWallet; // Need this in scope for createUserOnChain
 
       try {
-        const privyWallet = await createCustodialWallet(userId, email);
+        privyWallet = await createCustodialWallet(userId, email);
         walletAddress = privyWallet.walletAddress;
         privyUserId = privyWallet.privyUserId;
         console.log(`✅ Created Privy custodial wallet: ${walletAddress}`);
@@ -108,9 +109,9 @@ async function login(req, res) {
       const insertUserQuery = `
         INSERT INTO users (
           user_id, email, name, profile_pic, wallet_address,
-          role, rep, privy_user_id, provider_id
+          role, rep, privy_user_id, privy_wallet_id, provider_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
       `;
 
@@ -126,6 +127,7 @@ async function login(req, res) {
           'citizen',
           100,
           privyUserId,
+          privyWallet.walletId, // Store the wallet ID
           providerId
         ]);
         user = insertResult.rows[0];
@@ -157,8 +159,8 @@ async function login(req, res) {
         }
 
         try {
-          // Create user on-chain using Privy user ID (not wallet address)
-          const blockchainTx = await createUserOnChain(privyUserId, 100, 'citizen');
+          // Create user on-chain using wallet info directly (bypass Privy SDK get() bug)
+          const blockchainTx = await createUserOnChain(privyWallet, 100, 'citizen');
           if (blockchainTx) {
             console.log(`🔗 User created on-chain. Tx: ${blockchainTx}`);
           }
