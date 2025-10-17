@@ -141,7 +141,7 @@ async function login(req, res) {
 
         try {
           // Create user on-chain with the wallet address
-          const blockchainTx = await createUserOnChain(walletAddress, 100, 'citizen');
+          const blockchainTx = await createUserOnChain(walletAddress, privateKey, 100, 'citizen');
           if (blockchainTx) {
             console.log(`🔗 User created on-chain. Tx: ${blockchainTx}`);
           }
