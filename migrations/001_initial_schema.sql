@@ -33,7 +33,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS users (
   user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   wallet_address VARCHAR(255) UNIQUE NOT NULL,
-  private_key_encrypted TEXT,
+  private_key TEXT,
   email VARCHAR(255) UNIQUE NOT NULL,
   name VARCHAR(255) NOT NULL,
   profile_pic TEXT,
@@ -56,7 +56,7 @@ WHERE provider_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_users_wallet_address ON users(wallet_address);
 
 -- Add comments
-COMMENT ON COLUMN users.private_key_encrypted IS 'Encrypted Solana keypair private key (server-side storage)';
+COMMENT ON COLUMN users.private_key IS 'Solana keypair private key (server-side, base58-encoded, DV only)';
 COMMENT ON COLUMN users.wallet_address IS 'Solana public address derived from keypair';
 COMMENT ON COLUMN users.provider_id IS 'OAuth provider user ID (e.g., Google sub, Facebook ID)';
 
