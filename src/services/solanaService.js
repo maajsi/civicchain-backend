@@ -79,7 +79,7 @@ function loadUserKeypair(privateKeyBase58) {
 }
 
 // ---- Fund User Wallet ----
-async function fundWallet(toPublicKeyOrAddress, lamports = Math.floor(0.05 * LAMPORTS_PER_SOL)) {
+async function fundWallet(toPublicKeyOrAddress, amount = Math.floor(0.05 * LAMPORTS_PER_SOL)) {
   let toPubkey;
   if (toPublicKeyOrAddress instanceof PublicKey) {
     toPubkey = toPublicKeyOrAddress;
@@ -88,19 +88,34 @@ async function fundWallet(toPublicKeyOrAddress, lamports = Math.floor(0.05 * LAM
   } else {
     throw new Error('fundWallet: invalid argument');
   }
-  
+
+  // Allow callers to pass SOL (e.g., 0.05) or lamports (>= 1e6)
+  const lamports = amount < 1_000_000 ? Math.floor(amount * LAMPORTS_PER_SOL) : Math.floor(amount);
+
   const tx = new Transaction().add(
     SystemProgram.transfer({
       fromPubkey: masterKeypair.publicKey,
       toPubkey,
-      lamports: Math.floor(lamports),
+      lamports,
     })
   );
-  
+
   const signature = await connection.sendTransaction(tx, [masterKeypair]);
-  await connection.confirmTransaction(signature, "confirmed");
+  await connection.confirmTransaction(signature, 'confirmed');
   console.log(`💰 Funded wallet ${toPubkey.toBase58()} with ${lamports / LAMPORTS_PER_SOL} SOL. Tx: ${signature}`);
   return signature;
+}
+
+async function ensureSignerFunds(signerPubkey, minSol = 0.01) {
+  try {
+    const balanceLamports = await connection.getBalance(signerPubkey, 'confirmed');
+    const minLamports = Math.floor(minSol * LAMPORTS_PER_SOL);
+    if (balanceLamports < minLamports) {
+      await fundWallet(signerPubkey, minSol);
+    }
+  } catch (e) {
+    console.warn('ensureSignerFunds warning:', e.message);
+  }
 }
 
 // ---- Create User On-Chain ----
@@ -173,15 +188,15 @@ async function createIssueOnChain(userPrivateKeyBase58, issueId, category = 'oth
     console.warn('⚠️  Blockchain not configured. Skipping on-chain issue creation.');
     return null;
   }
-  
+
   const userKeypair = loadUserKeypair(userPrivateKeyBase58);
+  await ensureSignerFunds(userKeypair.publicKey, 0.01);
   const program = getProgram(userKeypair); // User signs their own transaction
-  
+
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
   const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), userKeypair.publicKey.toBuffer()], PROGRAM_ID);
 
-  // Anchor enum format: camelCase
   const categoryMap = {
     pothole: { pothole: {} },
     garbage: { garbage: {} },
@@ -190,11 +205,10 @@ async function createIssueOnChain(userPrivateKeyBase58, issueId, category = 'oth
     other: { other: {} }
   };
   const categoryEnum = categoryMap[category.toLowerCase()] || { other: {} };
-  
+
   try {
     console.log(`⛓️  Creating issue on-chain: ${issueId}`);
-    
-    // Convert Buffer to Uint8Array for Anchor (not Array.from which creates plain JS array)
+
     const tx = await program.methods
       .createIssue(new Uint8Array(issueHash), categoryEnum, priority)
       .accounts({
@@ -203,14 +217,21 @@ async function createIssueOnChain(userPrivateKeyBase58, issueId, category = 'oth
         authority: userKeypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
-      .signers([userKeypair]) // User signs their own transaction
+      .signers([userKeypair])
       .rpc();
-    
+
     console.log(`✅ Issue created on-chain. Tx: ${tx}`);
     return tx;
   } catch (error) {
+    try {
+      if (error && error.getLogs) {
+        const logs = await error.getLogs(connection);
+        console.error('On-chain logs:', logs);
+      } else if (error && (error.logs || error.transactionLogs)) {
+        console.error('On-chain logs:', error.logs || error.transactionLogs);
+      }
+    } catch (_) {}
     console.error('❌ Error creating issue on-chain:', error);
-    console.error('Stack trace:', error.stack);
     throw new Error(`Failed to create issue on-chain: ${error.message}`);
   }
 }
