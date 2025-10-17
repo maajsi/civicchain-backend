@@ -219,7 +219,6 @@ async function getIssues(req, res) {
         u.profile_pic as reporter_profile_pic
     `;
 
-    // Add distance if lat/lng provided
     if (lat && lng) {
       query += `,
         ST_Distance(
@@ -238,10 +237,9 @@ async function getIssues(req, res) {
     const params = [];
     let paramCount = 0;
 
-    // Add proximity filter
     if (lat && lng) {
       paramCount += 2;
-      const radiusMeters = radius || 5000; // Default 5km
+      const radiusMeters = radius || 5000;
       query += ` AND ST_DWithin(
         i.location,
         ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
@@ -251,21 +249,38 @@ async function getIssues(req, res) {
       paramCount++;
     }
 
-    // Add category filter
     if (category) {
-      paramCount++;
-      query += ` AND i.category = $${paramCount}`;
-      params.push(category);
+      const categories = String(category)
+        .split(',')
+        .map(c => c.trim())
+        .filter(Boolean);
+      if (categories.length === 1) {
+        paramCount++;
+        query += ` AND i.category = $${paramCount}`;
+        params.push(categories[0]);
+      } else if (categories.length > 1) {
+        paramCount++;
+        query += ` AND i.category = ANY($${paramCount}::issue_category[])`;
+        params.push(categories);
+      }
     }
 
-    // Add status filter
     if (status) {
-      paramCount++;
-      query += ` AND i.status = $${paramCount}`;
-      params.push(status);
+      const statuses = String(status)
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      if (statuses.length === 1) {
+        paramCount++;
+        query += ` AND i.status = $${paramCount}`;
+        params.push(statuses[0]);
+      } else if (statuses.length > 1) {
+        paramCount++;
+        query += ` AND i.status = ANY($${paramCount}::issue_status[])`;
+        params.push(statuses);
+      }
     }
 
-    // Sort by priority first, then distance (if available)
     if (lat && lng) {
       query += ` ORDER BY i.priority_score DESC, distance ASC`;
     } else {
