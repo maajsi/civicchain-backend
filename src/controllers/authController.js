@@ -2,8 +2,8 @@ const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/database');
 const { fundWallet, createUserOnChain, connection } = require('../services/solanaService');
-const { createCustodialWallet, getPrivyWallet } = require('../services/privyService');
-const { LAMPORTS_PER_SOL } = require('@solana/web3.js');
+const { Keypair } = require('@solana/web3.js');
+const bs58 = require('bs58');
 require('dotenv').config();
 
 /**
@@ -77,42 +77,24 @@ async function login(req, res) {
       isNew = false;
       console.log(`✅ Existing user logged in: ${email}`);
     } else {
+      // New user - generate keypair
       const userId = uuidv4();
-      let walletAddress;
-      let privyUserId;
-      let privyWallet; // Need this in scope for createUserOnChain
-
-      try {
-        privyWallet = await createCustodialWallet(userId, email);
-        walletAddress = privyWallet.walletAddress;
-        privyUserId = privyWallet.privyUserId;
-        console.log(`✅ Created Privy custodial wallet: ${walletAddress}`);
-      } catch (privyError) {
-        if (privyError.message?.includes('existing user')) {
-          const match = privyError.message.match(/(did:privy:[^\s]+)/);
-          if (!match) {
-            throw privyError;
-          }
-          privyUserId = match[1];
-          walletAddress = await getPrivyWallet(privyUserId);
-          console.log(`ℹ️  Reusing existing Privy wallet: ${walletAddress}`);
-        } else {
-          console.error('❌ Failed to create Privy wallet:', privyError);
-          return res.status(500).json({
-            success: false,
-            error: 'Failed to create custodial wallet',
-            details: privyError.message
-          });
-        }
-      }
+      
+      // Generate new Solana keypair
+      const keypair = Keypair.generate();
+      const walletAddress = keypair.publicKey.toBase58();
+      const privateKey = bs58.encode(keypair.secretKey);
+      
+      console.log(`✅ Generated new keypair for user: ${walletAddress}`);
 
       const insertUserQuery = `
         INSERT INTO users (
           user_id, email, name, profile_pic, wallet_address,
-          role, rep, privy_user_id, privy_wallet_id, provider_id
+          role, rep, private_key, provider_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        RETURNING *
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING user_id, email, name, profile_pic, wallet_address, role, rep, provider_id,
+                 issues_reported, issues_resolved, total_upvotes, verifications_done, badges, created_at
       `;
 
       const providerId = sub || null;
@@ -126,17 +108,17 @@ async function login(req, res) {
           walletAddress,
           'citizen',
           100,
-          privyUserId,
-          privyWallet.walletId, // Store the wallet ID
+          privateKey,
           providerId
         ]);
         user = insertResult.rows[0];
         isNew = true;
       } catch (insertError) {
         if (insertError.code === '23505') {
+          // Duplicate user - check if it exists by email or wallet
           const conflictResult = await client.query(
-            'SELECT * FROM users WHERE privy_user_id = $1',
-            [privyUserId]
+            'SELECT user_id, email, name, profile_pic, wallet_address, role, rep, provider_id, issues_reported, issues_resolved, total_upvotes, verifications_done, badges, created_at FROM users WHERE email = $1 OR wallet_address = $2',
+            [email, walletAddress]
           );
           if (!conflictResult.rows.length) {
             throw insertError;
@@ -151,21 +133,22 @@ async function login(req, res) {
 
       if (isNew) {
         try {
-          // Fund wallet with 0.05 SOL (convert to lamports)
-          const txSignature = await fundWallet(walletAddress, 0.05 * LAMPORTS_PER_SOL);
+          // Fund wallet with 0.05 SOL
+          const txSignature = await fundWallet(walletAddress, 0.05);
           console.log(`💰 Funded new wallet ${walletAddress} with 0.05 SOL. Tx: ${txSignature}`);
         } catch (fundError) {
           console.warn('⚠️  Failed to fund wallet:', fundError.message);
         }
 
         try {
-          // Create user on-chain using wallet info directly (bypass Privy SDK get() bug)
-          const blockchainTx = await createUserOnChain(privyWallet, 100, 'citizen');
+          // Create user on-chain with the wallet address
+          const blockchainTx = await createUserOnChain(walletAddress, 100, 'citizen');
           if (blockchainTx) {
             console.log(`🔗 User created on-chain. Tx: ${blockchainTx}`);
           }
         } catch (blockchainError) {
           console.warn('⚠️  Failed to create user on-chain:', blockchainError.message);
+          console.warn('⚠️  Stack:', blockchainError.stack);
         }
 
         console.log(`✅ New user created: ${email}`);
@@ -183,7 +166,6 @@ async function login(req, res) {
         name: user.name,
         profile_pic: user.profile_pic,
         wallet_address: user.wallet_address,
-        privy_user_id: user.privy_user_id,
         role: user.role,
         rep: user.rep,
         issues_reported: user.issues_reported,

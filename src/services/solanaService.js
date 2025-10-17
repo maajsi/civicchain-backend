@@ -1,23 +1,24 @@
 /**
  * CivicChain Solana Service
  * 
- * SERVER-SIDE BLOCKCHAIN APPROACH
- * --------------------------------
- * This service uses a server-side approach where:
- * 1. Privy custodial wallets are created for user identity (wallet addresses)
- * 2. Master wallet signs and pays for ALL blockchain transactions
- * 3. User wallet addresses are used as authorities in smart contract calls
+ * SERVER-SIDE CUSTODIAL WALLET APPROACH
+ * --------------------------------------
+ * This service uses a server-side custodial wallet approach:
+ * 1. Backend generates and stores user keypairs securely in database
+ * 2. Master wallet funds new user wallets with initial SOL
+ * 3. User keypairs sign their own transactions (true ownership)
+ * 4. Platform can assist with transaction signing when needed
  * 
  * Benefits:
- * - No gas fees for users
- * - Simplified user experience (no wallet management)
- * - Privy handles wallet creation and recovery
- * - All transactions paid by platform (master wallet)
+ * - True wallet ownership (users have their own keypairs)
+ * - On-chain transactions signed by actual user wallets
+ * - No third-party dependencies (no Privy)
+ * - Flexible: can add client-side signing later
  * 
- * Trade-offs:
- * - Platform pays for all gas fees
- * - Users don't directly sign transactions (delegated to master wallet)
- * - Still maintains on-chain user identity via PDA accounts
+ * Security:
+ * - Private keys encrypted in database
+ * - Access controlled by authentication
+ * - Can add HSM/KMS integration for production
  */
 const {
   Connection,
@@ -33,19 +34,7 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
-
-let privy;
-async function getPrivyClient() {
-  if (!privy) {
-    const module = await import('@privy-io/node');
-    privy = new module.PrivyClient({
-      appId: process.env.PRIVY_APP_ID,
-      appSecret: process.env.PRIVY_APP_SECRET,
-    });
-  }
-  return privy;
-}
-
+// Configuration
 const MASTER_WALLET_PRIVATE_KEY = process.env.MASTER_WALLET_PRIVATE_KEY;
 if (!MASTER_WALLET_PRIVATE_KEY) throw new Error('MASTER_WALLET_PRIVATE_KEY missing from .env');
 
@@ -53,50 +42,52 @@ const masterKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(MASTER_WA
 const connection = new Connection(process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com', 'confirmed');
 const PROGRAM_ID = new PublicKey(process.env.SOLANA_PROGRAM_ID);
 
-const idlPath = path.join(__dirname, '../../solana-contract/target/idl/idl.json');
-if (!fs.existsSync(idlPath)) throw new Error('IDL file not found at: ' + idlPath);
-const IDL = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+console.log('✅ Master wallet loaded:', masterKeypair.publicKey.toBase58());
+console.log('✅ Program ID:', PROGRAM_ID.toBase58());
+
+// Load IDL
+const idlPath = path.join(__dirname, '../../solana-contract/target/idl/civicchain.json');
+let IDL;
+if (fs.existsSync(idlPath)) {
+  IDL = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+  console.log('✅ Solana IDL loaded successfully');
+} else {
+  console.warn('⚠️  IDL file not found. Blockchain features disabled.');
+}
 
 function getProgram(wallet) {
+  if (!IDL) throw new Error('IDL not loaded');
   if (!wallet || !wallet.publicKey) throw new Error('getProgram: wallet is not a Keypair');
   const provider = new AnchorProvider(connection, new Wallet(wallet), { commitment: 'confirmed' });
   return new Program(IDL, PROGRAM_ID, provider);
 }
 
-// ---- Privy SDK: Get User's Solana Wallet ----
-// Use privy.wallets().get() instead of privy.users().get() as per docs
-async function getUserSolanaWallet(walletId) {
-  const privy = await getPrivyClient();
-  const wallet = await privy.wallets().get(walletId);
-  
-  if (!wallet) {
-    throw new Error('Privy: Wallet not found: ' + walletId);
-  }
-  
-  if (wallet.chain_type !== 'solana') {
-    throw new Error('Privy: Wallet is not a Solana wallet');
-  }
-
-  // Return wallet info
+// ---- Generate New User Wallet ----
+function generateUserWallet() {
+  const keypair = Keypair.generate();
   return {
-    walletId: wallet.id,
-    address: wallet.address,
-    publicKey: new PublicKey(wallet.address),
+    publicKey: keypair.publicKey.toBase58(),
+    privateKey: JSON.stringify(Array.from(keypair.secretKey)),
   };
 }
 
-// ---- Funding Wallet ----
-async function fundWallet(toPublicKeyOrKeypair, lamports = 1 * LAMPORTS_PER_SOL) {
+// ---- Load User Keypair from Private Key ----
+function loadUserKeypair(privateKeyJson) {
+  const secretKey = Uint8Array.from(JSON.parse(privateKeyJson));
+  return Keypair.fromSecretKey(secretKey);
+}
+
+// ---- Fund User Wallet ----
+async function fundWallet(toPublicKeyOrAddress, lamports = 0.05 * LAMPORTS_PER_SOL) {
   let toPubkey;
-  if (toPublicKeyOrKeypair instanceof Keypair) {
-    toPubkey = toPublicKeyOrKeypair.publicKey;
-  } else if (toPublicKeyOrKeypair instanceof PublicKey) {
-    toPubkey = toPublicKeyOrKeypair;
-  } else if (typeof toPublicKeyOrKeypair === 'string') {
-    toPubkey = new PublicKey(toPublicKeyOrKeypair);
+  if (toPublicKeyOrAddress instanceof PublicKey) {
+    toPubkey = toPublicKeyOrAddress;
+  } else if (typeof toPublicKeyOrAddress === 'string') {
+    toPubkey = new PublicKey(toPublicKeyOrAddress);
   } else {
     throw new Error('fundWallet: invalid argument');
   }
+  
   const tx = new Transaction().add(
     SystemProgram.transfer({
       fromPubkey: masterKeypair.publicKey,
@@ -104,52 +95,38 @@ async function fundWallet(toPublicKeyOrKeypair, lamports = 1 * LAMPORTS_PER_SOL)
       lamports,
     })
   );
+  
   const signature = await connection.sendTransaction(tx, [masterKeypair]);
   await connection.confirmTransaction(signature, "confirmed");
+  console.log(`💰 Funded wallet ${toPubkey.toBase58()} with ${lamports / LAMPORTS_PER_SOL} SOL. Tx: ${signature}`);
   return signature;
 }
 
 // ---- Create User On-Chain ----
-// Master wallet pays for account creation and signs transaction
-// User's wallet address (from Privy) is stored in the account but doesn't need to sign
-async function createUserOnChain(walletInfoOrId, initialRep = 100, role = 'citizen') {
-  let walletId, address, publicKey;
-  
-  // Support both formats: direct wallet info object OR wallet ID string
-  if (typeof walletInfoOrId === 'object') {
-    // Direct wallet info passed from createCustodialWallet
-    walletId = walletInfoOrId.walletId;
-    address = walletInfoOrId.walletAddress;
-    publicKey = new PublicKey(address);
-  } else if (typeof walletInfoOrId === 'string' && walletInfoOrId.length > 40) {
-    // Direct wallet address
-    publicKey = new PublicKey(walletInfoOrId);
-    address = walletInfoOrId;
-  } else {
-    // Wallet ID - fetch wallet info
-    const walletInfo = await getUserSolanaWallet(walletInfoOrId);
-    walletId = walletInfo.walletId;
-    address = walletInfo.address;
-    publicKey = walletInfo.publicKey;
+async function createUserOnChain(userPublicKey, userPrivateKeyJson, initialRep = 100, role = 'citizen') {
+  if (!IDL) {
+    console.warn('⚠️  Blockchain not configured. Skipping on-chain user creation.');
+    return null;
   }
   
+  const userKeypair = loadUserKeypair(userPrivateKeyJson);
   const program = getProgram(masterKeypair);
   
-  // PDA is derived from the user's public key
+  // PDA derived from user's public key
   const [userPDA] = PublicKey.findProgramAddressSync(
-    [Buffer.from('user'), publicKey.toBuffer()],
+    [Buffer.from('user'), userKeypair.publicKey.toBuffer()],
     PROGRAM_ID
   );
   
-  // Anchor v0.29 enum format: Rust PascalCase -> JS camelCase
+  // Anchor enum format: camelCase
   const roleEnum = role === 'government' ? { government: {} } : { citizen: {} };
   
   try {
-    console.log(`⛓️  Creating user account on-chain: ${address}`);
+    console.log(`⛓️  Creating user account on-chain: ${userPublicKey}`);
     
-    // Master wallet pays and signs, user's pubkey is stored in the account
+    // Master wallet pays for account creation, passes user's pubkey as parameter
     const tx = await program.methods
-      .initializeUser(publicKey, initialRep, roleEnum)
+      .initializeUser(userKeypair.publicKey, initialRep, roleEnum)
       .accounts({
         userAccount: userPDA,
         payer: masterKeypair.publicKey,
@@ -158,35 +135,30 @@ async function createUserOnChain(walletInfoOrId, initialRep = 100, role = 'citiz
       .signers([masterKeypair])
       .rpc();
     
-    console.log(`✅ User account created on-chain for ${address}. Tx: ${tx}`);
+    console.log(`✅ User account created on-chain. Tx: ${tx}`);
     return tx;
   } catch (error) {
     console.error('❌ Error creating user on-chain:', error);
+    console.error('Stack trace:', error.stack);
     throw new Error(`Failed to create user on-chain: ${error.message}`);
   }
 }
 
 // ---- Create Issue On-Chain ----
-async function createIssueOnChain(walletIdOrAddress, issueId, category = 'other', priority = 50) {
-  let publicKey;
-  
-  // Support wallet ID or direct address
-  if (typeof walletIdOrAddress === 'string' && walletIdOrAddress.length > 50) {
-    // It's a wallet address
-    publicKey = new PublicKey(walletIdOrAddress);
-  } else {
-    // It's a wallet ID - fetch wallet info
-    const walletInfo = await getUserSolanaWallet(walletIdOrAddress);
-    publicKey = walletInfo.publicKey;
+async function createIssueOnChain(userPrivateKeyJson, issueId, category = 'other', priority = 50) {
+  if (!IDL) {
+    console.warn('⚠️  Blockchain not configured. Skipping on-chain issue creation.');
+    return null;
   }
   
-  const program = getProgram(masterKeypair);
+  const userKeypair = loadUserKeypair(userPrivateKeyJson);
+  const program = getProgram(userKeypair); // User signs their own transaction
+  
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
-  const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), publicKey.toBuffer()], PROGRAM_ID);
+  const [userPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), userKeypair.publicKey.toBuffer()], PROGRAM_ID);
 
-  // Anchor v0.29 enum format: Rust PascalCase -> JS camelCase
-  // Pothole -> pothole, Garbage -> garbage, etc.
+  // Anchor enum format: camelCase
   const categoryMap = {
     pothole: { pothole: {} },
     garbage: { garbage: {} },
@@ -199,37 +171,44 @@ async function createIssueOnChain(walletIdOrAddress, issueId, category = 'other'
   try {
     console.log(`⛓️  Creating issue on-chain: ${issueId}`);
     
+    // Convert Buffer to Uint8Array for Anchor (not Array.from which creates plain JS array)
     const tx = await program.methods
-      .createIssue(Array.from(issueHash), categoryEnum, priority)
+      .createIssue(new Uint8Array(issueHash), categoryEnum, priority)
       .accounts({
         issueAccount: issuePDA,
         userAccount: userPDA,
-        authority: publicKey,
+        authority: userKeypair.publicKey,
         systemProgram: SystemProgram.programId,
       })
-      .signers([masterKeypair])
+      .signers([userKeypair]) // User signs their own transaction
       .rpc();
     
     console.log(`✅ Issue created on-chain. Tx: ${tx}`);
     return tx;
   } catch (error) {
     console.error('❌ Error creating issue on-chain:', error);
+    console.error('Stack trace:', error.stack);
     throw new Error(`Failed to create issue on-chain: ${error.message}`);
   }
 }
 
 // ---- Record Vote On-Chain ----
-async function recordVoteOnChain(voterWalletAddress, issueId, reporterWalletAddress, voteType = 'upvote') {
-  const voterPubkey = new PublicKey(voterWalletAddress);
-  const reporterPubkey = new PublicKey(reporterWalletAddress);
+async function recordVoteOnChain(voterPublicKey, voterPrivateKeyJson, issueId, reporterPublicKey, voteType = 'upvote') {
+  if (!IDL) {
+    console.warn('⚠️  Blockchain not configured. Skipping on-chain vote recording.');
+    return null;
+  }
   
-  const program = getProgram(masterKeypair);
+  const voterKeypair = loadUserKeypair(voterPrivateKeyJson);
+  const reporterPubkey = new PublicKey(reporterPublicKey);
+  const program = getProgram(voterKeypair); // Voter signs their own transaction
+  
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
   const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), reporterPubkey.toBuffer()], PROGRAM_ID);
-  const [voterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), voterPubkey.toBuffer()], PROGRAM_ID);
+  const [voterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), voterKeypair.publicKey.toBuffer()], PROGRAM_ID);
   
-  // Anchor v0.29 enum format: Rust Upvote/Downvote -> JS upvote/downvote
+  // Anchor enum format: camelCase
   const voteTypeEnum = voteType.toLowerCase() === 'upvote' ? { upvote: {} } : { downvote: {} };
   
   try {
@@ -241,9 +220,9 @@ async function recordVoteOnChain(voterWalletAddress, issueId, reporterWalletAddr
         issueAccount: issuePDA,
         reporterAccount: reporterPDA,
         voterAccount: voterPDA,
-        voter: voterPubkey,
+        voter: voterKeypair.publicKey,
       })
-      .signers([masterKeypair])
+      .signers([voterKeypair]) // Voter signs their own transaction
       .rpc();
     
     console.log(`✅ Vote recorded on-chain. Tx: ${tx}`);
@@ -255,15 +234,18 @@ async function recordVoteOnChain(voterWalletAddress, issueId, reporterWalletAddr
 }
 
 // ---- Record Verification On-Chain ----
-async function recordVerificationOnChain(verifierWalletAddress, issueId, reporterWalletAddress) {
-  const verifierPubkey = new PublicKey(verifierWalletAddress);
-  const reporterPubkey = new PublicKey(reporterWalletAddress);
+async function recordVerificationOnChain(verifierPrivateKeyJson, issueId) {
+  if (!IDL) {
+    console.warn('⚠️  Blockchain not configured. Skipping on-chain verification recording.');
+    return null;
+  }
   
-  const program = getProgram(masterKeypair);
+  const verifierKeypair = loadUserKeypair(verifierPrivateKeyJson);
+  const program = getProgram(verifierKeypair); // Verifier signs their own transaction
+  
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
-  const [verifierPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), verifierPubkey.toBuffer()], PROGRAM_ID);
-  const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), reporterPubkey.toBuffer()], PROGRAM_ID);
+  const [verifierPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), verifierKeypair.publicKey.toBuffer()], PROGRAM_ID);
   
   try {
     console.log(`⛓️  Recording verification on-chain for issue: ${issueId}`);
@@ -272,11 +254,10 @@ async function recordVerificationOnChain(verifierWalletAddress, issueId, reporte
       .recordVerification()
       .accounts({
         issueAccount: issuePDA,
-        reporterAccount: reporterPDA,
         verifierAccount: verifierPDA,
-        verifier: verifierPubkey,
+        verifier: verifierKeypair.publicKey,
       })
-      .signers([masterKeypair])
+      .signers([verifierKeypair]) // Verifier signs their own transaction
       .rpc();
     
     console.log(`✅ Verification recorded on-chain. Tx: ${tx}`);
@@ -288,15 +269,18 @@ async function recordVerificationOnChain(verifierWalletAddress, issueId, reporte
 }
 
 // ---- Update Issue Status On-Chain ----
-async function updateIssueStatusOnChain(governmentWalletAddress, issueId, reporterWalletAddress, newStatus = 'resolved') {
-  const governmentPubkey = new PublicKey(governmentWalletAddress);
-  const reporterPubkey = new PublicKey(reporterWalletAddress);
+async function updateIssueStatusOnChain(governmentPrivateKeyJson, issueId, newStatus = 'resolved') {
+  if (!IDL) {
+    console.warn('⚠️  Blockchain not configured. Skipping on-chain status update.');
+    return null;
+  }
   
-  const program = getProgram(masterKeypair);
+  const governmentKeypair = loadUserKeypair(governmentPrivateKeyJson);
+  const program = getProgram(governmentKeypair); // Government user signs their own transaction
+  
   const issueHash = createHash('sha256').update(issueId).digest();
   const [issuePDA] = PublicKey.findProgramAddressSync([Buffer.from('issue'), issueHash], PROGRAM_ID);
-  const [governmentPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), governmentPubkey.toBuffer()], PROGRAM_ID);
-  const [reporterPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), reporterPubkey.toBuffer()], PROGRAM_ID);
+  const [governmentPDA] = PublicKey.findProgramAddressSync([Buffer.from('user'), governmentKeypair.publicKey.toBuffer()], PROGRAM_ID);
 
   // Anchor v0.29 enum format: Rust IssueStatus variants -> JS camelCase
   // Open -> open, InProgress -> inProgress, Resolved -> resolved, Closed -> closed
@@ -317,11 +301,10 @@ async function updateIssueStatusOnChain(governmentWalletAddress, issueId, report
       .updateIssueStatus(statusEnum)
       .accounts({
         issueAccount: issuePDA,
-        reporterAccount: reporterPDA,
         governmentAccount: governmentPDA,
-        government: governmentPubkey,
+        government: governmentKeypair.publicKey,
       })
-      .signers([masterKeypair])
+      .signers([governmentKeypair]) // Government user signs their own transaction
       .rpc();
     
     console.log(`✅ Issue status updated on-chain. Tx: ${tx}`);
