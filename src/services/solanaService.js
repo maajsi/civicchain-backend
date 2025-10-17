@@ -46,7 +46,7 @@ console.log('✅ Master wallet loaded:', masterKeypair.publicKey.toBase58());
 console.log('✅ Program ID:', PROGRAM_ID.toBase58());
 
 // Load IDL
-const idlPath = path.join(__dirname, '../../solana-contract/target/idl/civicchain.json');
+const idlPath = path.join(__dirname, '../../solana-contract/target/idl/idl.json');
 let IDL;
 if (fs.existsSync(idlPath)) {
   IDL = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
@@ -354,6 +354,4 @@ module.exports = {
   recordVerificationOnChain,
   updateIssueStatusOnChain,
   updateReputationOnChain,
-  getUserSolanaWallet,
-  getPrivyClient, // Export for advanced usage
 };
