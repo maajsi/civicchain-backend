@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database with PostGIS
+  db:
+    image: postgis/postgis:15-3.3
+    container_name: civicchain-db
+    environment:
+      POSTGRES_DB: civicchain
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: civicchain
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - civicchain-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d civicchain"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Roboflow AI Service
+  ai-service:
+    image: roboflow/roboflow-inference-server-cpu:latest
+    container_name: civicchain-ai
+    ports:
+      - "9001:9001"
+    networks:
+      - civicchain-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # CivicChain Backend API
+  backend:
+    build: .
+    container_name: civicchain-backend
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    networks:
+      - civicchain-network
+    command: sh -c "npm run migrate && npm start"
+
+volumes:
+  postgres_data:
+
+networks:
+  civicchain-network:
+    driver: bridge
