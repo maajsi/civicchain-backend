@@ -13,7 +13,15 @@ async function verifyIssue(req, res) {
   try {
     const { id } = req.params;
     const userId = req.user.user_id;
-    const { verified } = req.body;
+    const { verified } = req.body || {};
+
+    // Accept several truthy forms for verified: boolean true, string 'true' or '1', numeric 1
+    const verifiedValue = (() => {
+      if (typeof verified === 'boolean') return verified;
+      if (typeof verified === 'string') return verified.toLowerCase() === 'true' || verified === '1';
+      if (typeof verified === 'number') return verified === 1;
+      return Boolean(verified);
+    })();
 
     // Verify user is a citizen (not government)
     if (req.user.role !== 'citizen') {
@@ -68,7 +76,7 @@ async function verifyIssue(req, res) {
       });
     }
 
-    if (!verified) {
+    if (!verifiedValue) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
