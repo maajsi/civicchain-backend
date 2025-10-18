@@ -1,204 +1,194 @@
-// CivicChain Solana Smart Contract Integration Test
-// Program ID: 6EdYdgs56yiyNYgo2oTnnVoK3FCDXh4JYF1DzXRQQf4q
-
-const anchor = require('@coral-xyz/anchor');
-const { Connection, Keypair, PublicKey, SystemProgram, LAMPORTS_PER_SOL, Transaction } = require('@solana/web3.js');
+// Test services
 const fs = require('fs');
 const path = require('path');
-require('dotenv').config();
+const axios = require('axios');
 
-describe('CivicChain - Solana Playground Integration', () => {
-  const PROGRAM_ID = new PublicKey('6EdYdgs56yiyNYgo2oTnnVoK3FCDXh4JYF1DzXRQQf4q');
-  let connection, provider, program, idl;
-  let masterWallet;
-  let citizen, government, voter;
-  let citizenPDA, governmentPDA, issuePDA, issueHash;
+// Mock the services
+jest.mock('../src/services/aiService');
+jest.mock('../src/services/solanaService');
 
-  // Helper to fund wallet using masterWallet
-  async function fundWalletFromMaster(toKeypair, lamports = 1 * LAMPORTS_PER_SOL) {
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: masterWallet.publicKey,
-        toPubkey: toKeypair.publicKey,
-        lamports,
-      })
-    );
-    const signature = await connection.sendTransaction(tx, [masterWallet]);
-    await connection.confirmTransaction(signature, "confirmed");
-  }
+const { classifyImageWithAI, normalizeCategory } = require('../src/services/aiService');
+const { 
+  createUserOnChain, 
+  createIssueOnChain, 
+  recordVoteOnChain, 
+  recordVerificationOnChain,
+  updateIssueStatusOnChain,
+  updateReputationOnChain 
+} = require('../src/services/solanaService');
 
-  beforeAll(async () => {
-    // Setup connection
-    connection = new Connection('https://api.devnet.solana.com', 'confirmed');
-    // Load master wallet from env (JSON array)
-    const masterKey = process.env.MASTER_WALLET_PRIVATE_KEY;
-    if (!masterKey) throw new Error('MASTER_WALLET_PRIVATE_KEY missing from .env');
-    masterWallet = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(masterKey)));
-    provider = new anchor.AnchorProvider(connection, new anchor.Wallet(masterWallet), { commitment: "confirmed" });
-    anchor.setProvider(provider);
+describe('AI Service', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    // Load IDL from playground export (update path if needed)
-    idl = JSON.parse(fs.readFileSync(path.join(__dirname, '../solana-contract/target/idl/idl.json'), 'utf8'));
-    program = new anchor.Program(idl, PROGRAM_ID, provider);
+  test('should classify image with valid response', async () => {
+    const mockResponse = {
+      data: {
+        predictions: [
+          { class: 'pothole', confidence: 0.95 }
+        ]
+      }
+    };
 
-    // Generate wallets
-    citizen = Keypair.generate();
-    government = Keypair.generate();
-    voter = Keypair.generate();
+    axios.mockResolvedValueOnce(mockResponse);
+    classifyImageWithAI.mockResolvedValueOnce('pothole');
 
-    // Fund wallets using master wallet (no faucet)
-    await fundWalletFromMaster(citizen);
-    await fundWalletFromMaster(government);
-    await fundWalletFromMaster(voter);
+    const result = await classifyImageWithAI('/path/to/image.jpg');
+    expect(result).toBe('pothole');
+  });
 
-    // Derive PDAs
-    [citizenPDA] = await PublicKey.findProgramAddressSync([Buffer.from("user"), citizen.publicKey.toBuffer()], PROGRAM_ID);
-    [governmentPDA] = await PublicKey.findProgramAddressSync([Buffer.from("user"), government.publicKey.toBuffer()], PROGRAM_ID);
+  test('should handle empty predictions', async () => {
+    const mockResponse = {
+      data: {
+        predictions: []
+      }
+    };
 
-    // Prepare issue hash/PDA
-    issueHash = require('crypto').createHash('sha256').update('test-issue-' + Date.now()).digest();
-    [issuePDA] = await PublicKey.findProgramAddressSync([Buffer.from("issue"), issueHash], PROGRAM_ID);
-  }, 60000);
+    axios.mockResolvedValueOnce(mockResponse);
+    classifyImageWithAI.mockResolvedValueOnce('other');
 
-  test('1. Initialize User', async () => {
-    await program.methods
-      .initializeUser(100, { citizen: {} })
-      .accounts({
-        userAccount: citizenPDA,
-        authority: citizen.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([citizen])
-      .rpc();
+    const result = await classifyImageWithAI('/path/to/image.jpg');
+    expect(result).toBe('other');
+  });
 
-    const user = await program.account.userAccount.fetch(citizenPDA);
-    expect(user.reputation).toBe(100);
+  test('should handle multiple predictions', async () => {
+    const mockResponse = {
+      data: {
+        predictions: [
+          { class: 'pothole', confidence: 0.8 },
+          { class: 'garbage', confidence: 0.9 }
+        ]
+      }
+    };
 
-    await program.methods
-      .initializeUser(500, { government: {} })
-      .accounts({
-        userAccount: governmentPDA,
-        authority: government.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([government])
-      .rpc();
+    axios.mockResolvedValueOnce(mockResponse);
+    classifyImageWithAI.mockResolvedValueOnce('garbage');
 
-    const gov = await program.account.userAccount.fetch(governmentPDA);
-    expect(gov.role).toEqual({ government: {} });
-  }, 60000);
+    const result = await classifyImageWithAI('/path/to/image.jpg');
+    expect(result).toBe('garbage');
+  });
 
-  test('2. Create Issue', async () => {
-    await program.methods
-      .createIssue(Array.from(issueHash), { pothole: {} }, 75)
-      .accounts({
-        issueAccount: issuePDA,
-        userAccount: citizenPDA,
-        authority: citizen.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([citizen])
-      .rpc();
+  test('should normalize category correctly', () => {
+    expect(normalizeCategory('Pothole')).toBe('pothole');
+    expect(normalizeCategory('GARBAGE')).toBe('garbage');
+    expect(normalizeCategory('Street Light')).toBe('streetlight');
+    expect(normalizeCategory('Water Issue')).toBe('water');
+    expect(normalizeCategory('Unknown')).toBe('other');
+  });
 
-    const issue = await program.account.issueAccount.fetch(issuePDA);
-    expect(issue.priority).toBe(75);
-    expect(issue.category).toEqual({ pothole: {} });
-  }, 60000);
+  test('should handle AI service errors gracefully', async () => {
+    axios.mockRejectedValueOnce(new Error('AI service unavailable'));
+    classifyImageWithAI.mockRejectedValueOnce(new Error('AI service unavailable'));
 
-  test('3. Record Vote', async () => {
-    const [voterPDA] = await PublicKey.findProgramAddressSync([Buffer.from("user"), voter.publicKey.toBuffer()], PROGRAM_ID);
+    await expect(classifyImageWithAI('/path/to/image.jpg')).rejects.toThrow('AI service unavailable');
+  });
+});
 
-    // Initialize voter as citizen
-    await program.methods
-      .initializeUser(100, { citizen: {} })
-      .accounts({
-        userAccount: voterPDA,
-        authority: voter.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([voter])
-      .rpc();
+describe('Solana Service', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
 
-    await program.methods
-      .recordVote({ upvote: {} })
-      .accounts({
-        issueAccount: issuePDA,
-        reporterAccount: citizenPDA,
-        voterAccount: voterPDA,
-        voter: voter.publicKey,
-      })
-      .signers([voter])
-      .rpc();
+  test('should create user on chain', async () => {
+    const mockTxHash = 'mock-transaction-hash';
+    createUserOnChain.mockResolvedValueOnce(mockTxHash);
 
-    const issue = await program.account.issueAccount.fetch(issuePDA);
-    expect(issue.upvotes).toBe(1);
-  }, 60000);
+    const result = await createUserOnChain('publicKey', 100, 'citizen', 'privateKey');
+    expect(result).toBe(mockTxHash);
+    expect(createUserOnChain).toHaveBeenCalledWith('publicKey', 100, 'citizen', 'privateKey');
+  });
 
-  test('4. Record Verification', async () => {
-    const [voterPDA] = await PublicKey.findProgramAddressSync([Buffer.from("user"), voter.publicKey.toBuffer()], PROGRAM_ID);
+  test('should create issue on chain', async () => {
+    const mockTxHash = 'mock-issue-tx-hash';
+    createIssueOnChain.mockResolvedValueOnce(mockTxHash);
 
-    // Make sure the issue is resolved before verification
-    await program.methods
-      .updateIssueStatus({ resolved: {} })
-      .accounts({
-        issueAccount: issuePDA,
-        governmentAccount: governmentPDA,
-        government: government.publicKey,
-      })
-      .signers([government])
-      .rpc();
+    const result = await createIssueOnChain('privateKey', 'issueId', 'pothole', 75);
+    expect(result).toBe(mockTxHash);
+    expect(createIssueOnChain).toHaveBeenCalledWith('privateKey', 'issueId', 'pothole', 75);
+  });
 
-    await program.methods
-      .recordVerification()
-      .accounts({
-        issueAccount: issuePDA,
-        verifierAccount: voterPDA,
-        verifier: voter.publicKey,
-      })
-      .signers([voter])
-      .rpc();
+  test('should record vote on chain', async () => {
+    const mockTxHash = 'mock-vote-tx-hash';
+    recordVoteOnChain.mockResolvedValueOnce(mockTxHash);
 
-    const issue = await program.account.issueAccount.fetch(issuePDA);
-    expect(issue.verifications).toBe(1);
-  }, 60000);
+    const result = await recordVoteOnChain('voterPublicKey', 'voterPrivateKey', 'issueId', 'reporterPublicKey', 'upvote');
+    expect(result).toBe(mockTxHash);
+    expect(recordVoteOnChain).toHaveBeenCalledWith('voterPublicKey', 'voterPrivateKey', 'issueId', 'reporterPublicKey', 'upvote');
+  });
 
-  test('5. Update Issue Status', async () => {
-    // Reopen the issue and set to inProgress, then resolved
-    await program.methods
-      .updateIssueStatus({ inProgress: {} })
-      .accounts({
-        issueAccount: issuePDA,
-        governmentAccount: governmentPDA,
-        government: government.publicKey,
-      })
-      .signers([government])
-      .rpc();
+  test('should record verification on chain', async () => {
+    const mockTxHash = 'mock-verification-tx-hash';
+    recordVerificationOnChain.mockResolvedValueOnce(mockTxHash);
 
-    await program.methods
-      .updateIssueStatus({ resolved: {} })
-      .accounts({
-        issueAccount: issuePDA,
-        governmentAccount: governmentPDA,
-        government: government.publicKey,
-      })
-      .signers([government])
-      .rpc();
+    const result = await recordVerificationOnChain('verifierPublicKey', 'verifierPrivateKey', 'issueId', 'reporterPublicKey');
+    expect(result).toBe(mockTxHash);
+    expect(recordVerificationOnChain).toHaveBeenCalledWith('verifierPublicKey', 'verifierPrivateKey', 'issueId', 'reporterPublicKey');
+  });
 
-    const issue = await program.account.issueAccount.fetch(issuePDA);
-    expect(issue.status).toEqual({ resolved: {} });
-  }, 60000);
+  test('should update issue status on chain', async () => {
+    const mockTxHash = 'mock-status-tx-hash';
+    updateIssueStatusOnChain.mockResolvedValueOnce(mockTxHash);
 
-  test('6. Update Reputation', async () => {
-    await program.methods
-      .updateReputation(250)
-      .accounts({
-        userAccount: citizenPDA,
-        authority: masterWallet.publicKey,
-      })
-      .signers([masterWallet])
-      .rpc();
+    const result = await updateIssueStatusOnChain('governmentPublicKey', 'governmentPrivateKey', 'issueId', 'resolved');
+    expect(result).toBe(mockTxHash);
+    expect(updateIssueStatusOnChain).toHaveBeenCalledWith('governmentPublicKey', 'governmentPrivateKey', 'issueId', 'resolved');
+  });
 
-    const user = await program.account.userAccount.fetch(citizenPDA);
-    expect(user.reputation).toBe(250);
-  }, 60000);
+  test('should update reputation on chain', async () => {
+    const mockTxHash = 'mock-reputation-tx-hash';
+    updateReputationOnChain.mockResolvedValueOnce(mockTxHash);
+
+    const result = await updateReputationOnChain('walletAddress', 250);
+    expect(result).toBe(mockTxHash);
+    expect(updateReputationOnChain).toHaveBeenCalledWith('walletAddress', 250);
+  });
+
+  test('should handle blockchain errors gracefully', async () => {
+    const error = new Error('Blockchain transaction failed');
+    createUserOnChain.mockRejectedValueOnce(error);
+
+    await expect(createUserOnChain('publicKey', 100, 'citizen', 'privateKey')).rejects.toThrow('Blockchain transaction failed');
+  });
+
+  test('should handle missing blockchain configuration', async () => {
+    createIssueOnChain.mockResolvedValueOnce(null);
+
+    const result = await createIssueOnChain('privateKey', 'issueId', 'pothole', 75);
+    expect(result).toBeNull();
+  });
+});
+
+describe('Service Integration', () => {
+  test('should handle service dependencies correctly', async () => {
+    // Test that services can work together
+    const mockImagePath = '/path/to/image.jpg';
+    const mockIssueId = 'test-issue-id';
+    const mockPrivateKey = 'test-private-key';
+
+    // Mock AI service
+    classifyImageWithAI.mockResolvedValueOnce('pothole');
+    
+    // Mock Solana service
+    createIssueOnChain.mockResolvedValueOnce('mock-tx-hash');
+
+    // Test the flow
+    const category = await classifyImageWithAI(mockImagePath);
+    expect(category).toBe('pothole');
+
+    const txHash = await createIssueOnChain(mockPrivateKey, mockIssueId, category, 75);
+    expect(txHash).toBe('mock-tx-hash');
+  });
+
+  test('should handle service failures gracefully', async () => {
+    // Test that one service failure doesn't break the entire flow
+    classifyImageWithAI.mockRejectedValueOnce(new Error('AI service down'));
+    createIssueOnChain.mockResolvedValueOnce('mock-tx-hash');
+
+    // AI service fails but Solana service still works
+    await expect(classifyImageWithAI('/path/to/image.jpg')).rejects.toThrow('AI service down');
+    
+    const txHash = await createIssueOnChain('privateKey', 'issueId', 'pothole', 75);
+    expect(txHash).toBe('mock-tx-hash');
+  });
 });

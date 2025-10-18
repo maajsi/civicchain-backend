@@ -16,6 +16,7 @@ describe('Database Configuration', () => {
     expect(migrationContent).toContain('CREATE TABLE IF NOT EXISTS issues');
     expect(migrationContent).toContain('CREATE TABLE IF NOT EXISTS votes');
     expect(migrationContent).toContain('CREATE TABLE IF NOT EXISTS verifications');
+    expect(migrationContent).toContain('CREATE TABLE IF NOT EXISTS schema_migrations');
   });
 
   test('migration should enable PostGIS extension', () => {
@@ -42,12 +43,37 @@ describe('Database Configuration', () => {
     expect(migrationContent).toContain('issue_status');
     expect(migrationContent).toContain('vote_type');
   });
+
+  test('migration should create proper indexes', () => {
+    const migrationPath = path.join(__dirname, '../migrations/001_initial_schema.sql');
+    const migrationContent = fs.readFileSync(migrationPath, 'utf8');
+    
+    expect(migrationContent).toContain('CREATE INDEX IF NOT EXISTS issues_status_idx');
+    expect(migrationContent).toContain('CREATE INDEX IF NOT EXISTS issues_category_idx');
+    expect(migrationContent).toContain('CREATE INDEX IF NOT EXISTS issues_priority_idx');
+    expect(migrationContent).toContain('CREATE INDEX IF NOT EXISTS users_wallet_address');
+  });
 });
 
 describe('Smart Contract', () => {
   test('should have Solana contract file', () => {
     const contractPath = path.join(__dirname, '../solana-contract/programs/civicchain/src/lib.rs');
     expect(fs.existsSync(contractPath)).toBe(true);
+  });
+
+  test('should have IDL file', () => {
+    const idlPath = path.join(__dirname, '../solana-contract/target/idl/idl.json');
+    expect(fs.existsSync(idlPath)).toBe(true);
+  });
+
+  test('should have Anchor.toml configuration', () => {
+    const anchorTomlPath = path.join(__dirname, '../solana-contract/Anchor.toml');
+    expect(fs.existsSync(anchorTomlPath)).toBe(true);
+  });
+
+  test('should have Cargo.toml for the program', () => {
+    const cargoTomlPath = path.join(__dirname, '../solana-contract/programs/civicchain/Cargo.toml');
+    expect(fs.existsSync(cargoTomlPath)).toBe(true);
   });
 
   test('contract should contain required instructions', () => {
@@ -84,12 +110,38 @@ describe('Docker Configuration', () => {
     expect(dockerComposeContent).toContain('db:');
     expect(dockerComposeContent).toContain('ai-service:');
     expect(dockerComposeContent).toContain('backend:');
-    expect(dockerComposeContent).toContain('postgis/postgis');
-    expect(dockerComposeContent).toContain('roboflow/roboflow-inference-server-cpu');
+    expect(dockerComposeContent).toContain('postgis/postgis:15-3.3');
+    expect(dockerComposeContent).toContain('roboflow/roboflow-inference-server-cpu:latest');
+  });
+
+  test('docker-compose should have proper networking', () => {
+    const dockerComposePath = path.join(__dirname, '../docker-compose.yml');
+    const dockerComposeContent = fs.readFileSync(dockerComposePath, 'utf8');
+    
+    expect(dockerComposeContent).toContain('civicchain-network');
+    expect(dockerComposeContent).toContain('networks:');
+    expect(dockerComposeContent).toContain('driver: bridge');
+  });
+
+  test('docker-compose should have health checks', () => {
+    const dockerComposePath = path.join(__dirname, '../docker-compose.yml');
+    const dockerComposeContent = fs.readFileSync(dockerComposePath, 'utf8');
+    
+    expect(dockerComposeContent).toContain('healthcheck:');
+    expect(dockerComposeContent).toContain('pg_isready');
   });
 
   test('should have Dockerfile', () => {
     const dockerfilePath = path.join(__dirname, '../Dockerfile');
     expect(fs.existsSync(dockerfilePath)).toBe(true);
+  });
+
+  test('should have proper environment configuration', () => {
+    const dockerComposePath = path.join(__dirname, '../docker-compose.yml');
+    const dockerComposeContent = fs.readFileSync(dockerComposePath, 'utf8');
+    
+    expect(dockerComposeContent).toContain('env_file:');
+    expect(dockerComposeContent).toContain('.env');
+    expect(dockerComposeContent).toContain('POSTGRES_DB: civicchain');
   });
 });
