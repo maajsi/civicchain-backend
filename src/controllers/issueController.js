@@ -20,8 +20,16 @@ async function classifyIssue(req, res) {
       });
     }
 
-    const imageUrl = `/uploads/${req.file.filename}`;
-    const imagePath = path.join(__dirname, '../../uploads', req.file.filename);
+    // multer.memoryStorage() doesn't set `filename`, it sets `originalname`.
+    // Use whichever is available to avoid path.join(undefined) in tests.
+    const filename = req.file.filename || req.file.originalname || '';
+
+    if (!filename) {
+      return res.status(400).json({ success: false, error: 'No image file provided' });
+    }
+
+    const imageUrl = `/uploads/${filename}`;
+    const imagePath = path.join(__dirname, '../../uploads', filename);
 
     // Call Roboflow AI service for classification
     const suggestedCategory = await classifyImageWithAI(imagePath);
@@ -78,15 +86,13 @@ async function reportIssue(req, res) {
       });
     }
 
-    await client.query('BEGIN');
-
     // Get user details
     const userQuery = 'SELECT * FROM users WHERE user_id = $1';
     const userResult = await client.query(userQuery, [userId]);
     const user = userResult.rows[0];
     console.log('DEBUG: userID', userId);
     if (!user) {
-      await client.query('ROLLBACK');
+      // nothing has been modified yet
       return res.status(404).json({
         success: false,
         error: 'User not found'
@@ -102,7 +108,10 @@ async function reportIssue(req, res) {
       created_at: new Date()
     });
 
-    // Create issue
+  // Start transaction and create issue
+  await client.query('BEGIN');
+
+  // Create issue
     const issueId = uuidv4();
     const insertIssueQuery = `
       INSERT INTO issues (

@@ -83,12 +83,14 @@ function normalizeCategory(aiClass) {
     'street_light': 'streetlight',
     'light': 'streetlight',
     'water': 'water',
+  'water_issue': 'water',
     'water_leak': 'water',
     'waterlogging': 'water',
     'water_main': 'water'
   };
   
-  const normalized = aiClass.toLowerCase().trim();
+  // normalize whitespace/hyphens to underscores so variants like "Street Light" match
+  const normalized = aiClass.toLowerCase().trim().replace(/\s+/g, '_').replace(/-/g, '_');
   return categoryMap[normalized] || 'other';
 }
 
