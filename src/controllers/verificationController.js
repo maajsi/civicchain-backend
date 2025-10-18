@@ -14,7 +14,7 @@ async function verifyIssue(req, res) {
     const { id } = req.params;
     const userId = req.user.user_id;
     const { verified } = req.body || {};
-
+    console.log('Verify issue request body:', JSON.stringify(req.body));
     // Accept several truthy forms for verified: boolean true, string 'true' or '1', numeric 1
     const verifiedValue = (() => {
       if (typeof verified === 'boolean') return verified;
