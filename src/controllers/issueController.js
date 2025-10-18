@@ -208,10 +208,16 @@ async function getIssues(req, res) {
   const client = await pool.connect();
   
   try {
+    console.log('=== GET ISSUES DEBUG ===');
+    console.log('Raw req.query:', req.query);
+    console.log('Raw req.url:', req.url);
+    console.log('Raw req.originalUrl:', req.originalUrl);
+    
     const { lat, lng, radius, category, status } = req.query;
     
-    console.log('=== GET ISSUES DEBUG ===');
-    console.log('Query params:', { lat, lng, radius, category, status });
+    console.log('Extracted params:', { lat, lng, radius, category, status });
+    console.log('Status type:', typeof status);
+    console.log('Status value:', status);
 
     const params = [];
     let paramCount = 0;
