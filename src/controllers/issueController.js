@@ -238,15 +238,14 @@ async function getIssues(req, res) {
     let paramCount = 0;
 
     if (lat && lng) {
-      paramCount += 2;
       const radiusMeters = radius || 5000;
       query += ` AND ST_DWithin(
         i.location,
-        ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-        $${paramCount + 1}
+        ST_SetSRID(ST_MakePoint($${paramCount + 1}, $${paramCount + 2}), 4326)::geography,
+        $${paramCount + 3}
       )`;
       params.push(parseFloat(lng), parseFloat(lat), radiusMeters);
-      paramCount++;
+      paramCount += 3;
     }
 
     if (category) {

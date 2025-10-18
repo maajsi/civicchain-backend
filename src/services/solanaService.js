@@ -1,25 +1,3 @@
-/**
- * CivicChain Solana Service
- * 
- * SERVER-SIDE CUSTODIAL WALLET APPROACH
- * --------------------------------------
- * This service uses a server-side custodial wallet approach:
- * 1. Backend generates and stores user keypairs securely in database
- * 2. Master wallet funds new user wallets with initial SOL
- * 3. User keypairs sign their own transactions (true ownership)
- * 4. Platform can assist with transaction signing when needed
- * 
- * Benefits:
- * - True wallet ownership (users have their own keypairs)
- * - On-chain transactions signed by actual user wallets
- * - No third-party dependencies (no Privy)
- * - Flexible: can add client-side signing later
- * 
- * Security:
- * - Private keys encrypted in database
- * - Access controlled by authentication
- * - Can add HSM/KMS integration for production
- */
 const {
   Connection,
   Keypair,

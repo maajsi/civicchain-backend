@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # PostgreSQL database with PostGIS
   db:
     image: postgis/postgis:15-3.3
     container_name: civicchain-db
