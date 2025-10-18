@@ -209,6 +209,12 @@ async function getIssues(req, res) {
   
   try {
     const { lat, lng, radius, category, status } = req.query;
+    
+    console.log('=== GET ISSUES DEBUG ===');
+    console.log('Query params:', { lat, lng, radius, category, status });
+
+    const params = [];
+    let paramCount = 0;
 
     let query = `
       SELECT 
@@ -223,7 +229,7 @@ async function getIssues(req, res) {
       query += `,
         ST_Distance(
           i.location,
-          ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
+          ST_SetSRID(ST_MakePoint($${paramCount + 1}, $${paramCount + 2}), 4326)::geography
         ) as distance
       `;
     }
@@ -233,9 +239,6 @@ async function getIssues(req, res) {
       JOIN users u ON i.reporter_user_id = u.user_id
       WHERE 1=1
     `;
-
-    const params = [];
-    let paramCount = 0;
 
     if (lat && lng) {
       const radiusMeters = radius || 5000;
@@ -269,14 +272,19 @@ async function getIssues(req, res) {
         .split(',')
         .map(s => s.trim())
         .filter(Boolean);
+      
+      console.log('Processing status filter:', statuses);
+      
       if (statuses.length === 1) {
         paramCount++;
         query += ` AND i.status = $${paramCount}`;
         params.push(statuses[0]);
+        console.log(`Added status filter: i.status = $${paramCount} with value: ${statuses[0]}`);
       } else if (statuses.length > 1) {
         paramCount++;
         query += ` AND i.status = ANY($${paramCount}::issue_status[])`;
         params.push(statuses);
+        console.log(`Added multiple status filter: i.status = ANY($${paramCount}) with values:`, statuses);
       }
     }
 
@@ -285,6 +293,10 @@ async function getIssues(req, res) {
     } else {
       query += ` ORDER BY i.priority_score DESC, i.created_at DESC`;
     }
+
+    console.log('Final query:', query);
+    console.log('Final params:', params);
+    console.log('========================');
 
     const result = await client.query(query, params);
 
@@ -310,6 +322,11 @@ async function getIssues(req, res) {
       updated_at: row.updated_at,
       distance: row.distance || null
     }));
+
+    console.log(`Returning ${issues.length} issues`);
+    issues.forEach(issue => {
+      console.log(`- Issue ${issue.issue_id}: status=${issue.status}, distance=${issue.distance}`);
+    });
 
     return res.status(200).json({
       success: true,
